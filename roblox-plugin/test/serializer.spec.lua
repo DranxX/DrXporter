@@ -1,0 +1,23 @@
+return function()
+	describe("Serializer", function()
+		it("should serialize property values", function()
+			local Properties = require(script.Parent.Parent.src.plugin.serializer.properties)
+			local result = Properties.serializeValue("hello")
+			expect(result).to.be.ok()
+		end)
+
+		it("should serialize Color3", function()
+			local Properties = require(script.Parent.Parent.src.plugin.serializer.properties)
+			local result = Properties.serializeValue(Color3.new(1, 0, 0))
+			expect(result).to.be.ok()
+			expect(result.type).to.equal("Color3")
+		end)
+
+		it("should serialize Vector3", function()
+			local Properties = require(script.Parent.Parent.src.plugin.serializer.properties)
+			local result = Properties.serializeValue(Vector3.new(1, 2, 3))
+			expect(result).to.be.ok()
+			expect(result.type).to.equal("Vector3")
+		end)
+	end)
+end

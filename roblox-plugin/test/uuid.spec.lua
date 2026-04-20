@@ -1,0 +1,10 @@
+return function()
+	describe("UUID Service", function()
+		it("should generate valid UUIDs", function()
+			local HttpService = game:GetService("HttpService")
+			local uuid = HttpService:GenerateGUID(false)
+			expect(uuid).to.be.ok()
+			expect(#uuid).to.be.ok()
+		end)
+	end)
+end

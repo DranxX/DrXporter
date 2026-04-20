@@ -1,0 +1,22 @@
+{
+  "name": "drxporter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Two-way sync system between Roblox Studio and local workspace",
+  "scripts": {
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "build:binary": "node scripts/build-binary.mjs",
+    "build:all": "node scripts/build-all.mjs",
+    "dev": "tsx vscode-binary/src/main.ts serve",
+    "serve": "node vscode-binary/dist/drxporter.js serve"
+  },
+  "workspaces": [
+    "vscode-binary",
+    "shared"
+  ],
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0",
+    "esbuild": "^0.20.0"
+  }
+}

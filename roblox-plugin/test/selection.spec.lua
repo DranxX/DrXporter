@@ -1,0 +1,10 @@
+return function()
+	describe("Selection Service", function()
+		it("should resolve empty selection", function()
+			local SelectionService = require(script.Parent.Parent.src.plugin["selection-service"])
+			local result = SelectionService.resolveSelection({})
+			expect(result).to.be.ok()
+			expect(result.totalSelected).to.equal(0)
+		end)
+	end)
+end
