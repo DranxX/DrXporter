@@ -1,5 +1,7 @@
 # DrXporter
 
+> **⚠️ Perhatian:** Ini adalah project pribadi dan kemungkinan akan berhenti atau di-update secara berjangka (tidak tentu). Untuk bagian UI, silakan perbarui/modifikasi sesuai kebutuhan dan selera masing-masing.
+
 Two-way sync system between Roblox Studio and your local filesystem. Export scripts and instances from Studio to organized local files, edit them in your favorite editor, and sync changes back — all in real-time.
 
 ## How It Works
