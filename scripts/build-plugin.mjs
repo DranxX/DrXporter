@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -16,12 +16,14 @@ try {
     process.exit(1);
   }
 
-  execSync(`rojo build default.project.json --output "${resolve(OUTPUT_DIR, "Drxporter.rbxm")}"`, {
+  rmSync(resolve(OUTPUT_DIR, "Drxporter.rbxm"), { force: true });
+
+  execSync(`rojo build default.project.json --output "${resolve(OUTPUT_DIR, "drxporter-plugin.rbxmx")}"`, {
     cwd: PLUGIN_DIR,
     stdio: "inherit",
   });
 
-  console.log("[build:plugin] Plugin built -> output/roblox-plugin/Drxporter.rbxm");
+  console.log("[build:plugin] Plugin built -> output/roblox-plugin/drxporter-plugin.rbxmx");
 } catch (err) {
   console.error("[build:plugin] FATAL:", err.message);
   process.exit(1);
