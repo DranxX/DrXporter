@@ -1,6 +1,6 @@
 export function printHelp(): void {
   const text = `
-DrXporter CLI v0.1.0
+DrXporter CLI v1.0.1
 
 Usage: drxporter [command] [options]
 
@@ -17,7 +17,7 @@ Commands:
 
 Options:
   --help, -h         Show this help message
-  --port, -p <port>  Bridge server port (default: 34872)
+  --port, -p <port>  Bridge server port (default: 51234)
   --host <host>      Bridge server host (default: 127.0.0.1)
   --verbose, -v      Verbose output
 

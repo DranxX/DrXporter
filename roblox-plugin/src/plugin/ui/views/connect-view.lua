@@ -24,7 +24,7 @@ function ConnectView.render(parent)
 
 	local portInput = Input.create({
 		name = "PortInput",
-		placeholder = "Port (34872)",
+		placeholder = "Port (51234)",
 		defaultValue = tostring(Constants.DEFAULT_BRIDGE_PORT),
 		parent = section.content,
 	})

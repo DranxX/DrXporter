@@ -9,7 +9,7 @@ export interface DrxporterSettings {
 }
 
 export const DEFAULT_SETTINGS: DrxporterSettings = {
-  bridgePort: 34872,
+  bridgePort: 51234,
   bridgeHost: "127.0.0.1",
   outputRoot: "./output",
   cacheDir: ".drxporter-cache",

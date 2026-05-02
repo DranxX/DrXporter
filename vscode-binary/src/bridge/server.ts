@@ -1,6 +1,7 @@
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRouter } from "./router";
 import { createLogger } from "../logging/logger";
+import { stopWatcher } from "./watcher";
 
 const logger = createLogger("server");
 
@@ -62,20 +63,32 @@ export function createServer(options: ServerOptions): BridgeServer {
 
   return {
     async start() {
-      return new Promise<void>((resolve) => {
-        httpServer.listen(options.port, options.host, () => {
+      return new Promise<void>((resolve, reject) => {
+        const handleError = (err: Error) => {
+          httpServer.off("listening", handleListening);
+          reject(err);
+        };
+
+        const handleListening = () => {
+          httpServer.off("error", handleError);
           logger.info(`Bridge server listening on ${options.host}:${options.port}`);
           logger.info("Waiting for Studio to connect and export...");
           resolve();
-        });
+        };
+
+        httpServer.once("error", handleError);
+        httpServer.once("listening", handleListening);
+        httpServer.listen(options.port, options.host);
       });
     },
     async stop() {
       return new Promise<void>((resolve, reject) => {
+        stopWatcher();
         httpServer.close((err) => {
           if (err) reject(err);
           else resolve();
         });
+        httpServer.closeAllConnections();
       });
     },
   };

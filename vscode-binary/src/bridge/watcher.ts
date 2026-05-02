@@ -24,6 +24,8 @@ let isWatching = false;
 let startupGracePeriod = true;
 const recentWrites = new Map<string, number>();
 let fsWatcher: FSWatcher | null = null;
+let startupGraceTimer: NodeJS.Timeout | null = null;
+const debounceTimers = new Map<string, NodeJS.Timeout>();
 let cachedLookup: Map<string, { uuid: string; className: string }> | null = null;
 let lookupCacheTime = 0;
 const LOOKUP_CACHE_TTL = 10_000;
@@ -52,10 +54,20 @@ export function stopWatcher(): void {
     fsWatcher.close();
     fsWatcher = null;
   }
+  if (startupGraceTimer) {
+    clearTimeout(startupGraceTimer);
+    startupGraceTimer = null;
+  }
+  for (const timer of debounceTimers.values()) {
+    clearTimeout(timer);
+  }
+  debounceTimers.clear();
   isWatching = false;
+  startupGracePeriod = true;
   pendingChanges.length = 0;
   recentWrites.clear();
   cachedLookup = null;
+  lookupCacheTime = 0;
 }
 
 export function startWatcher(srcDir: string, cacheDir: string): void {
@@ -66,14 +78,15 @@ export function startWatcher(srcDir: string, cacheDir: string): void {
   }
 
   isWatching = true;
+  startupGracePeriod = true;
   logger.info(`Watching for script changes in: ${srcDir}`);
 
-  setTimeout(() => {
+  startupGraceTimer = setTimeout(() => {
+    startupGraceTimer = null;
     startupGracePeriod = false;
     logger.info("File watcher active (grace period ended)");
   }, STARTUP_GRACE_MS);
-
-  const debounceTimers = new Map<string, NodeJS.Timeout>();
+  startupGraceTimer.unref?.();
 
   fsWatcher = watch(srcDir, { recursive: true }, (eventType, filename) => {
     if (!filename) return;
@@ -100,6 +113,7 @@ export function startWatcher(srcDir: string, cacheDir: string): void {
         processFileChange(fullPath, srcDir, cacheDir);
       }, DEBOUNCE_MS)
     );
+    debounceTimers.get(fullPath)?.unref?.();
   });
 }
 

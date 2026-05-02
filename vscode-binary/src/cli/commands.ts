@@ -1,9 +1,10 @@
 import type { ParsedArgs } from "./args";
-import { createServer } from "../bridge/server";
+import { createServer, type BridgeServer } from "../bridge/server";
 import { createLogger } from "../logging/logger";
 import { resolveFlag } from "./flags";
 
 const logger = createLogger("commands");
+const DEFAULT_BRIDGE_PORT = 51234;
 
 const COMMANDS: Record<string, (args: ParsedArgs) => Promise<void>> = {
   serve: handleServe,
@@ -25,12 +26,12 @@ export async function executeCommand(args: ParsedArgs): Promise<void> {
 }
 
 async function handleServe(args: ParsedArgs): Promise<void> {
-  const port = Number(resolveFlag(args.flags, "port", 34872));
+  const port = Number(resolveFlag(args.flags, "port", DEFAULT_BRIDGE_PORT));
   const host = String(resolveFlag(args.flags, "host", "127.0.0.1"));
 
   logger.info(`Starting bridge server on ${host}:${port}`);
-  const server = createServer({ port, host });
-  await server.start();
+  const activeServer = await startServerWithPortFallback(host, port);
+  await waitForShutdown(activeServer.server, activeServer.port);
 }
 
 async function handleReset(_args: ParsedArgs): Promise<void> {
@@ -115,4 +116,90 @@ async function handleBuildAll(_args: ParsedArgs): Promise<void> {
   const { execSync } = await import("node:child_process");
   logger.info("Building all...");
   execSync("node ../scripts/build-all.mjs", { stdio: "inherit", cwd: process.cwd() });
+}
+
+async function waitForShutdown(server: BridgeServer, port: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let shuttingDown = false;
+    const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGBREAK"];
+
+    if (process.platform !== "win32") {
+      signals.push("SIGTSTP");
+    }
+
+    const removeHandlers = () => {
+      for (const signal of signals) {
+        process.off(signal, handleSignal);
+      }
+    };
+
+    const handleSignal = (signal: NodeJS.Signals) => {
+      if (shuttingDown) {
+        return;
+      }
+
+      shuttingDown = true;
+      removeHandlers();
+      logger.info(`Received ${signal}, shutting down bridge server on port ${port}...`);
+
+      const forceExitTimer = setTimeout(() => {
+        logger.error("Shutdown timed out, forcing exit.");
+        process.exit(1);
+      }, 2_000);
+      forceExitTimer.unref?.();
+
+      void server
+        .stop()
+        .then(() => {
+          clearTimeout(forceExitTimer);
+          logger.info(`Bridge server stopped. Port ${port} released.`);
+          resolve();
+          process.exit(0);
+        })
+        .catch((err) => {
+          clearTimeout(forceExitTimer);
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error(`Shutdown failed: ${message}`);
+          reject(err);
+          process.exit(1);
+        });
+    };
+
+    for (const signal of signals) {
+      process.on(signal, handleSignal);
+    }
+  });
+}
+
+async function startServerWithPortFallback(
+  host: string,
+  startPort: number,
+): Promise<{ server: BridgeServer; port: number }> {
+  for (let port = startPort; port <= 65535; port++) {
+    const server = createServer({ port, host });
+    try {
+      await server.start();
+      if (port !== startPort) {
+        logger.warn(`Port ${startPort} is unavailable; using ${port} instead.`);
+        logger.warn(`Use port ${port} in the Roblox plugin connect screen.`);
+      }
+      return { server, port };
+    } catch (err) {
+      if (!isNodeError(err) || err.code !== "EADDRINUSE") {
+        throw err;
+      }
+
+      if (port === 65535) {
+        throw err;
+      }
+
+      logger.warn(`Port ${port} is unavailable; trying ${port + 1}...`);
+    }
+  }
+
+  throw new Error(`No available bridge port found from ${startPort} to 65535`);
+}
+
+function isNodeError(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && "code" in err;
 }

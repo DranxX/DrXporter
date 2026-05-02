@@ -11,13 +11,25 @@ mkdirSync(resolve(ROOT, "output/logs"), { recursive: true });
 console.log("[build:all] Starting full build...\n");
 
 try {
-  const { execSync } = await import("node:child_process");
+  const { execFileSync } = await import("node:child_process");
 
   console.log("=== Phase 1: Plugin ===");
-  execSync("node scripts/build-plugin.mjs", { cwd: ROOT, stdio: "inherit" });
+  execFileSync(process.execPath, ["scripts/build-plugin.mjs"], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
 
-  console.log("\n=== Phase 2: Binary ===");
-  execSync("node scripts/build-binary.mjs", { cwd: ROOT, stdio: "inherit" });
+  console.log("\n=== Phase 2: Binary (Linux/macOS) ===");
+  execFileSync(process.execPath, ["scripts/build-binary.mjs"], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
+
+  console.log("\n=== Phase 3: Binary (Windows) ===");
+  execFileSync(process.execPath, ["scripts/build-binary.mjs", "--windows"], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
 
   console.log("\n[build:all] Full build complete.");
 } catch (err) {

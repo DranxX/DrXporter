@@ -60,6 +60,8 @@ cd Drxporter
 npm install
 ```
 
+## Build
+
 ### Build Everything
 
 ```bash
@@ -68,24 +70,73 @@ npm run build:all
 
 This produces:
 - `output/roblox-plugin/drxporter-plugin.rbxmx` — Install this in Roblox Studio
-- `output/vscode-binary/drxporter` — The local bridge binary
+- `output/vscode-binary/drxporter` — Linux/macOS bridge binary
+- `output/vscode-binary/drxporter-windows.exe` — The Windows bridge executable
 
-### Build Individually
+### Build Plugin Only
 
 ```bash
-npm run build:plugin    # Plugin only
-npm run build:binary    # Binary only
+npm run build:plugin
+```
+
+Output:
+- `output/roblox-plugin/drxporter-plugin.rbxmx`
+
+### Build Linux/macOS Binary
+
+```bash
+npm run build:binary
+```
+
+Output:
+- `output/vscode-binary/drxporter`
+
+### Build Windows Binary
+
+```bash
+npm run build:binary -- --windows
+```
+
+Output:
+- `output/vscode-binary/drxporter-windows.exe`
+
+The `--windows` build uses `@yao-pkg/pkg` to package the Node.js bridge into a Windows executable. The generated target follows your current machine architecture:
+- `x64` host → `node20-win-x64`
+- `arm64` host → `node20-win-arm64`
+
+If you are inside WSL, use the Linux/macOS binary (`output/vscode-binary/drxporter`). Running the Windows executable from WSL goes through WSLInterop and uses the Windows network stack, so Linux tools like `lsof` may not show the process that is blocking a port.
+
+If Windows reports `EADDRINUSE` even though nothing appears in `netstat`, the port may be reserved by Windows rather than used by a normal process. Check reserved ranges with:
+
+```bat
+netsh interface ipv4 show excludedportrange protocol=tcp
 ```
 
 ## Usage
 
 ### 1. Start the Bridge Server
 
+Linux/macOS:
+
 ```bash
-npm run serve
+./output/vscode-binary/drxporter
 ```
 
-The server starts on `127.0.0.1:34872` by default.
+Windows PowerShell:
+
+```powershell
+.\drxporter-windows.exe
+```
+
+The bridge starts on `127.0.0.1:51234` by default. If `51234` is unavailable, DrXporter automatically tries `51235`, `51236`, and so on.
+
+You can choose the starting port manually:
+
+```powershell
+.\drxporter-windows.exe --port 51234
+```
+
+Make sure the port in the Roblox plugin connect screen matches the port printed by the bridge server. If the bridge logs `Bridge server listening on 127.0.0.1:51235`, enter `51235` in the plugin.
 
 For development with hot-reload:
 
@@ -147,7 +198,7 @@ The bridge server defaults:
 | Setting | Default |
 |---|---|
 | Host | `127.0.0.1` |
-| Port | `34872` |
+| Port | `51234` |
 | Protocol Version | `1.0.0` |
 
 ## License

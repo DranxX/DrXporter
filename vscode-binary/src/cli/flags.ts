@@ -8,7 +8,7 @@ export interface FlagDefinition {
 
 export const GLOBAL_FLAGS: FlagDefinition[] = [
   { name: "help", alias: "h", type: "boolean", description: "Show help" },
-  { name: "port", alias: "p", type: "number", defaultValue: 34872, description: "Bridge server port" },
+  { name: "port", alias: "p", type: "number", defaultValue: 51234, description: "Bridge server port" },
   { name: "host", type: "string", defaultValue: "127.0.0.1", description: "Bridge server host" },
   { name: "verbose", alias: "v", type: "boolean", description: "Verbose output" },
   { name: "config", alias: "c", type: "string", description: "Config file path" },

@@ -13,7 +13,7 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  logger.info(`DrXporter v0.1.0 - command: ${args.command}`);
+  logger.info(`DrXporter v1.0.1 - command: ${args.command}`);
 
   try {
     await executeCommand(args);
@@ -22,5 +22,3 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 }
-
-
