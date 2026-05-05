@@ -63,7 +63,7 @@ function OptionsView.render(parent)
 
 	local refreshBtn = Button.create({
 		name = "RefreshButton",
-		text = "REFRESH FROM ROBLOX",
+		text = "REFRESH ROBLOX -> VSCODE",
 		color = Theme.Colors.Success,
 		textColor = Theme.Colors.Background,
 		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
@@ -73,7 +73,7 @@ function OptionsView.render(parent)
 
 	local forceOverwriteBtn = Button.create({
 		name = "ForceOverwriteButton",
-		text = "FORCE OVERWRITE SRC",
+		text = "FORCE ROBLOX -> VSCODE",
 		color = Theme.Colors.Error,
 		textColor = Theme.Colors.Text,
 		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
@@ -90,6 +90,26 @@ function OptionsView.render(parent)
 		parent = section.content,
 	})
 	importBtn.LayoutOrder = 6
+
+	local importAllBtn = Button.create({
+		name = "ImportAllButton",
+		text = "IMPORT ALL VSCODE -> ROBLOX",
+		color = Theme.Colors.AccentBlue,
+		textColor = Theme.Colors.Background,
+		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
+		parent = section.content,
+	})
+	importAllBtn.LayoutOrder = 7
+
+	local forceImportBtn = Button.create({
+		name = "ForceImportButton",
+		text = "FORCE VSCODE -> ROBLOX",
+		color = Theme.Colors.Warning,
+		textColor = Theme.Colors.Background,
+		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
+		parent = section.content,
+	})
+	forceImportBtn.LayoutOrder = 8
 
 	local settingsSection = Section.create({
 		name = "SettingsSection",
@@ -226,7 +246,7 @@ function OptionsView.render(parent)
 			else
 				showStatus("✗ Refresh failed: " .. tostring(err), Theme.Colors.Error)
 			end
-			refreshBtn.Text = "REFRESH FROM ROBLOX"
+			refreshBtn.Text = "REFRESH ROBLOX -> VSCODE"
 		end)
 	end)
 
@@ -246,7 +266,7 @@ function OptionsView.render(parent)
 			else
 				showStatus("✗ Force overwrite failed: " .. tostring(err), Theme.Colors.Error)
 			end
-			forceOverwriteBtn.Text = "FORCE OVERWRITE SRC"
+			forceOverwriteBtn.Text = "FORCE ROBLOX -> VSCODE"
 		end)
 	end)
 
@@ -282,6 +302,46 @@ function OptionsView.render(parent)
 				showStatus("✗ Import failed: " .. tostring(err), Theme.Colors.Error)
 			end
 			importBtn.Text = "IMPORT SELECTED"
+		end)
+	end)
+
+	importAllBtn.MouseButton1Click:Connect(function()
+		if not State.isConnected() then
+			showStatus("✗ Not connected to bridge", Theme.Colors.Error)
+			return
+		end
+
+		importAllBtn.Text = "IMPORTING ALL..."
+		showStatus("Importing VSCode snapshot into Roblox...", Theme.Colors.TextMuted)
+
+		task.spawn(function()
+			local success, err = ImportService.importAllFromBridge(false)
+			if success then
+				showStatus("✓ Imported VSCode snapshot", Theme.Colors.Success)
+			else
+				showStatus("✗ Import all failed: " .. tostring(err), Theme.Colors.Error)
+			end
+			importAllBtn.Text = "IMPORT ALL VSCODE -> ROBLOX"
+		end)
+	end)
+
+	forceImportBtn.MouseButton1Click:Connect(function()
+		if not State.isConnected() then
+			showStatus("✗ Not connected to bridge", Theme.Colors.Error)
+			return
+		end
+
+		forceImportBtn.Text = "OVERWRITING..."
+		showStatus("Replacing tracked Roblox items from VSCode...", Theme.Colors.Warning)
+
+		task.spawn(function()
+			local success, err = ImportService.importAllFromBridge(true)
+			if success then
+				showStatus("✓ Force import from VSCode completed", Theme.Colors.Success)
+			else
+				showStatus("✗ Force import failed: " .. tostring(err), Theme.Colors.Error)
+			end
+			forceImportBtn.Text = "FORCE VSCODE -> ROBLOX"
 		end)
 	end)
 

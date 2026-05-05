@@ -22,6 +22,7 @@ local _refreshing = false
 local _lastCacheRefresh = 0
 local CACHE_REFRESH_INTERVAL = STUDIO_SCAN_INTERVAL
 local STABLE_NUMBER_PRECISION = 10000
+local findInstanceByUuid
 
 local function normalizeStableNumber(value)
 	if value ~= value or value == math.huge or value == -math.huge then return 0 end
@@ -97,6 +98,62 @@ local function getParentUuid(instance)
 	return UuidService.getUuid(parent)
 end
 
+local SERVICE_SET = {}
+for _, serviceName in Constants.SERVICE_NAMES do
+	SERVICE_SET[serviceName] = true
+end
+
+local function findParentForData(data)
+	if data.parentUuid then
+		local parent = findInstanceByUuid(data.parentUuid)
+		if parent then return parent end
+	end
+
+	if data.className and SERVICE_SET[data.className] then
+		local ok, svc = pcall(function()
+			return game:GetService(data.className)
+		end)
+		if ok and svc then return svc end
+	end
+
+	local ok, workspace = pcall(function()
+		return game:GetService("Workspace")
+	end)
+	if ok and workspace then return workspace end
+	return nil
+end
+
+local function createInstanceForData(data)
+	if not data.uuid or not data.className then return nil end
+
+	if SERVICE_SET[data.className] then
+		local ok, svc = pcall(function()
+			return game:GetService(data.className)
+		end)
+		if ok and svc then
+			UuidService.setUuid(svc, data.uuid)
+			return svc
+		end
+		return nil
+	end
+
+	local parent = findParentForData(data)
+	if not parent then return nil end
+
+	local ok, inst = pcall(function()
+		return Instance.new(data.className)
+	end)
+	if not ok or not inst then
+		Logger.warn("Cannot create instance class from VSCode: " .. tostring(data.className))
+		return nil
+	end
+
+	inst.Name = data.name or data.className
+	UuidService.setUuid(inst, data.uuid)
+	inst.Parent = parent
+	return inst
+end
+
 local function buildMetadata(instance)
 	local data = InstanceJsonSerializer.serialize(instance)
 	if not data then return nil end
@@ -110,7 +167,7 @@ local function metadataHash(instance)
 	return hashSource(stableEncode(data))
 end
 
-local function findInstanceByUuid(uuid)
+function findInstanceByUuid(uuid)
 	for _, entry in _instanceCache do
 		if entry.uuid == uuid and entry.instance and entry.instance.Parent then
 			return entry.instance
@@ -362,11 +419,17 @@ end
 
 local function applyInstanceChange(change)
 	local data = change.data or change
+	if change.parentUuid ~= nil and data.parentUuid == nil then
+		data.parentUuid = change.parentUuid
+	end
 	local uuid = data.uuid or change.uuid
 	if not uuid then return false end
 
 	local target = findInstanceByUuid(uuid)
-	if not target then return false end
+	if not target then
+		target = createInstanceForData(data)
+		if not target then return false end
+	end
 
 	_recentSynced[uuid] = os.clock()
 
@@ -380,13 +443,22 @@ local function applyInstanceChange(change)
 	applyAttributes(target, data.attributes)
 	applyTags(target, data.tags)
 	refreshHashesFor(target, uuid)
+	_knownUuids[uuid] = true
 	Logger.info("Sync from VSCode: " .. target:GetFullName())
 	return true
 end
 
 local function applyScriptChange(change)
 	local target = findInstanceByUuid(change.uuid)
-	if not target then return false end
+	if not target then
+		target = createInstanceForData({
+			uuid = change.uuid,
+			className = change.className or "ModuleScript",
+			name = change.name or "ModuleScript",
+			parentUuid = change.parentUuid,
+		})
+		if not target then return false end
+	end
 	if not Constants.SCRIPT_CLASSES[target.ClassName] then return false end
 
 	_recentSynced[change.uuid] = os.clock()
@@ -404,8 +476,29 @@ local function applyScriptChange(change)
 	end
 
 	refreshHashesFor(target, change.uuid)
+	_knownUuids[change.uuid] = true
 	Logger.info("Sync from VSCode: " .. target:GetFullName())
 	return true
+end
+
+local function applyDeleteChange(change)
+	local uuid = change.uuid
+	if not uuid then return false end
+
+	local target = findInstanceByUuid(uuid)
+	_knownUuids[uuid] = nil
+	_sourceHashes[uuid] = nil
+	_metadataHashes[uuid] = nil
+	if not target then return true end
+	if SERVICE_SET[target.ClassName] then return true end
+
+	local ok = pcall(function()
+		target:Destroy()
+	end)
+	if ok then
+		Logger.info("Deleted from VSCode: " .. tostring(change.relativePath or uuid))
+	end
+	return ok
 end
 
 local function scanStudioChanges()
@@ -513,13 +606,15 @@ function SyncService.startPolling()
 					local changes = data.payload.changes
 					if #changes > 0 then
 						Logger.info("Sync from VSCode: " .. #changes .. " item(s)")
-						for _, change in changes do
-							if change.type == "script" then
-								applyScriptChange(change)
-							elseif change.type == "instance" then
-								applyInstanceChange(change)
+							for _, change in changes do
+								if change.type == "script" then
+									applyScriptChange(change)
+								elseif change.type == "instance" then
+									applyInstanceChange(change)
+								elseif change.type == "delete" then
+									applyDeleteChange(change)
+								end
 							end
-						end
 					end
 				end
 			end

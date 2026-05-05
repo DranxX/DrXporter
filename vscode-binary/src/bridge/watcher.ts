@@ -1,11 +1,13 @@
 import { existsSync, readFileSync, readdirSync, rmSync, watch, type FSWatcher } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { CacheEntry, CacheKey, InstanceJson, PlaceCache } from "@drxporter/shared";
-import { INSTANCE_JSON_EXTENSION, isFolderClass, isScriptClass } from "@drxporter/shared";
+import { INSTANCE_JSON_EXTENSION, isFolderClass, isScriptClass, isServiceClass } from "@drxporter/shared";
 import { createLogger } from "../logging/logger";
 import { CacheStore } from "../cache/cache-store";
 import {
   classNameFromScriptFile,
+  normalizeRelativePath,
   pathLeafName,
   pathParent,
   readInstanceJsonFile,
@@ -14,12 +16,13 @@ import {
   scriptExtension,
   scriptSuffixForFile,
   workspaceFilePath,
+  workspaceFolderPath,
   writeInstanceJsonFile,
 } from "./sync-files";
 
 const logger = createLogger("watcher");
 
-export type FileChange = ScriptFileChange | InstanceFileChange;
+export type FileChange = ScriptFileChange | InstanceFileChange | DeleteFileChange;
 
 export interface ScriptFileChange {
   uuid: string;
@@ -28,6 +31,7 @@ export interface ScriptFileChange {
   type: "script";
   content: string;
   name: string;
+  parentUuid: string | null;
 }
 
 export interface InstanceFileChange {
@@ -36,6 +40,15 @@ export interface InstanceFileChange {
   className: string;
   type: "instance";
   data: InstanceJson;
+  name: string;
+  parentUuid: string | null;
+}
+
+export interface DeleteFileChange {
+  uuid: string;
+  relativePath: string;
+  className: string;
+  type: "delete";
   name: string;
 }
 
@@ -49,6 +62,12 @@ interface WorkspaceScriptFile {
   fullPath: string;
   relativePath: string;
   className: string;
+}
+
+interface WorkspaceInstanceFile {
+  fullPath: string;
+  relativePath: string;
+  data: Partial<InstanceJson> | null;
 }
 
 const MAX_PENDING = 200;
@@ -151,6 +170,7 @@ export function startWatcher(srcDir: string, cacheDir: string): void {
   startupGraceTimer = setTimeout(() => {
     startupGraceTimer = null;
     startupGracePeriod = false;
+    reconcileWorkspace(srcDir, cacheDir);
     logger.info("File watcher active (grace period ended)");
   }, STARTUP_GRACE_MS);
   startupGraceTimer.unref?.();
@@ -159,17 +179,17 @@ export function startWatcher(srcDir: string, cacheDir: string): void {
     if (!filename || startupGracePeriod) return;
 
     const name = String(filename).replace(/\\/g, "/");
+    if (eventType === "rename") {
+      scheduleReconcile(srcDir, cacheDir);
+      return;
+    }
+
     const isScript = name.endsWith(".lua");
     const isInstanceJson = name.endsWith(INSTANCE_JSON_EXTENSION);
     if (!isScript && !isInstanceJson) return;
 
     const fullPath = resolve(srcDir, name);
     if (wasRecentlyWritten(fullPath)) return;
-
-    if (eventType === "rename") {
-      scheduleReconcile(srcDir, cacheDir);
-      return;
-    }
 
     if (!existsSync(fullPath)) return;
     scheduleFileChange(fullPath, srcDir, cacheDir, isInstanceJson ? "instance" : "script");
@@ -230,6 +250,236 @@ function loadCaches(cacheDir: string): Array<{ key: CacheKey; cache: PlaceCache 
   return caches;
 }
 
+function getWritableCache(cacheDir: string, preferredKey?: CacheKey): { key: CacheKey; cache: PlaceCache } | null {
+  const store = new CacheStore(cacheDir);
+  if (preferredKey) {
+    return { key: preferredKey, cache: store.load(preferredKey) };
+  }
+
+  const caches = loadCaches(cacheDir);
+  if (caches.length > 0) return caches[0];
+  return null;
+}
+
+function saveCache(cacheDir: string, key: CacheKey, cache: PlaceCache): void {
+  const store = new CacheStore(cacheDir);
+  store.save(key, cache);
+  invalidateLookupCache();
+}
+
+function nextUuid(): string {
+  return randomUUID();
+}
+
+function entryFromInstance(relativePath: string, parentUuid: string | null, data: InstanceJson): CacheEntry {
+  return {
+    uuid: data.uuid,
+    className: data.className,
+    name: data.name,
+    parentUuid,
+    lastExportedAt: Date.now(),
+    relativePath,
+    properties: data.properties || {},
+    attributes: data.attributes || {},
+    tags: data.tags || [],
+    children: data.children || [],
+  };
+}
+
+function addChild(cache: PlaceCache, parentUuid: string | null, childUuid: string): void {
+  if (!parentUuid) return;
+  const parent = cache.entries[parentUuid];
+  if (!parent) return;
+  const children = parent.children || [];
+  if (!children.includes(childUuid)) {
+    parent.children = [...children, childUuid];
+  }
+}
+
+function removeChildRefs(cache: PlaceCache, removedUuid: string): void {
+  for (const entry of Object.values(cache.entries)) {
+    if (entry.children) {
+      entry.children = entry.children.filter((uuid) => uuid !== removedUuid);
+    }
+  }
+}
+
+function cacheEntryByPath(cache: PlaceCache, relativePath: string): [string, CacheEntry] | null {
+  for (const [uuid, entry] of Object.entries(cache.entries)) {
+    if (entry.relativePath === relativePath) return [uuid, entry];
+  }
+  return null;
+}
+
+function readLooseInstanceJson(fullPath: string): Partial<InstanceJson> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(fullPath, "utf-8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as Partial<InstanceJson>;
+  } catch {
+    return null;
+  }
+}
+
+function ensureWorkspaceParent(
+  cache: PlaceCache,
+  relativePath: string,
+): { uuid: string | null; created: CacheEntry[] } {
+  const parts = relativePath.split("/").filter(Boolean);
+  const created: CacheEntry[] = [];
+  if (parts.length <= 1) return { uuid: null, created };
+
+  let parentUuid: string | null = null;
+  let currentPath = "";
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const name = parts[i];
+    currentPath = currentPath ? `${currentPath}/${name}` : name;
+    const existing = cacheEntryByPath(cache, currentPath);
+    if (existing) {
+      parentUuid = existing[0];
+      continue;
+    }
+
+    const className = i === 0 && isServiceClass(name) ? name : "Folder";
+    const uuid = nextUuid();
+    const entry: CacheEntry = {
+      uuid,
+      className,
+      name,
+      parentUuid,
+      lastExportedAt: Date.now(),
+      relativePath: currentPath,
+      properties: {},
+      attributes: {},
+      tags: [],
+      children: [],
+    };
+    cache.entries[uuid] = entry;
+    addChild(cache, parentUuid, uuid);
+    created.push(entry);
+    parentUuid = uuid;
+  }
+
+  return { uuid: parentUuid, created };
+}
+
+function queueInstanceCreate(entry: CacheEntry): void {
+  const data = instanceJsonFromCacheEntry(entry);
+  queueChange({
+    uuid: entry.uuid,
+    relativePath: entry.relativePath,
+    className: entry.className,
+    type: "instance",
+    data,
+    name: entry.name,
+    parentUuid: entry.parentUuid,
+  });
+}
+
+function queueScriptCreate(entry: CacheEntry): void {
+  queueChange({
+    uuid: entry.uuid,
+    relativePath: entry.relativePath,
+    className: entry.className,
+    type: "script",
+    content: entry.source || "",
+    name: entry.name,
+    parentUuid: entry.parentUuid,
+  });
+}
+
+function instanceJsonFromCacheEntry(entry: CacheEntry): InstanceJson {
+  return {
+    uuid: entry.uuid,
+    className: entry.className,
+    name: entry.name,
+    properties: entry.properties || {},
+    attributes: entry.attributes || {},
+    tags: entry.tags || [],
+    children: entry.children || [],
+  };
+}
+
+function collectSubtree(cache: PlaceCache, rootUuid: string): string[] {
+  const result: string[] = [];
+  const visited = new Set<string>();
+
+  function visit(uuid: string): void {
+    if (visited.has(uuid)) return;
+    visited.add(uuid);
+    const entry = cache.entries[uuid];
+    if (!entry) return;
+
+    for (const [childUuid, child] of Object.entries(cache.entries)) {
+      if (child.parentUuid === uuid) visit(childUuid);
+    }
+    for (const childUuid of entry.children || []) visit(childUuid);
+    result.push(uuid);
+  }
+
+  visit(rootUuid);
+  return result;
+}
+
+function normalizeWorkspacePath(path: string): string {
+  return normalizeRelativePath(path.replace(/\\/g, "/"));
+}
+
+function ingestWorkspaceFolders(folderPaths: string[], cacheDir: string, preferredKey?: CacheKey): void {
+  const target = getWritableCache(cacheDir, preferredKey);
+  if (!target) return;
+
+  let dirty = false;
+  for (const folderPath of [...folderPaths].sort((a, b) => a.length - b.length)) {
+    if (cacheEntryByPath(target.cache, folderPath)) continue;
+    const parent = ensureWorkspaceParent(target.cache, `${folderPath}/__folder__`);
+    for (const entry of parent.created) {
+      queueInstanceCreate(entry);
+      dirty = true;
+    }
+  }
+
+  if (dirty) {
+    saveCache(cacheDir, target.key, target.cache);
+  }
+}
+
+function queueDeletedWorkspaceEntries(srcDir: string, cacheDir: string, preferredKey?: CacheKey): void {
+  const contexts = preferredKey ? [getWritableCache(cacheDir, preferredKey)].filter(Boolean) : loadCaches(cacheDir);
+  for (const context of contexts as Array<{ key: CacheKey; cache: PlaceCache }>) {
+    let dirty = false;
+    for (const [uuid, entry] of Object.entries({ ...context.cache.entries })) {
+      if (!context.cache.entries[uuid]) continue;
+      if (isServiceClass(entry.className)) continue;
+
+      const suffix = isScriptClass(entry.className) ? scriptExtension(entry.className) : INSTANCE_JSON_EXTENSION;
+      const expected = isFolderClass(entry.className)
+        ? workspaceFolderPath(srcDir, entry.relativePath)
+        : workspaceFilePath(srcDir, entry.relativePath, suffix);
+
+      if (expected && existsSync(expected)) continue;
+
+      for (const subtreeUuid of collectSubtree(context.cache, uuid)) {
+        const subtreeEntry = context.cache.entries[subtreeUuid];
+        if (!subtreeEntry || isServiceClass(subtreeEntry.className)) continue;
+        queueChange({
+          uuid: subtreeUuid,
+          relativePath: subtreeEntry.relativePath,
+          className: subtreeEntry.className,
+          type: "delete",
+          name: subtreeEntry.name,
+        });
+        removeChildRefs(context.cache, subtreeUuid);
+        delete context.cache.entries[subtreeUuid];
+        dirty = true;
+      }
+    }
+
+    if (dirty) saveCache(cacheDir, context.key, context.cache);
+  }
+}
+
 function buildScriptLookupCache(cacheDir: string): Map<string, CacheRef> {
   const now = Date.now();
   if (cachedLookup && now - lookupCacheTime < LOOKUP_CACHE_TTL) {
@@ -269,6 +519,99 @@ function saveCacheEntry(cacheDir: string, ref: CacheRef, entry: CacheEntry): voi
   invalidateLookupCache();
 }
 
+function ingestUntrackedScript(
+  fullPath: string,
+  srcDir: string,
+  cacheDir: string,
+  relativePath: string,
+  className: string,
+  suffix: string,
+  preferredKey?: CacheKey,
+): boolean {
+  const target = getWritableCache(cacheDir, preferredKey);
+  if (!target) {
+    logger.debug(`Changed script not in cache: ${relativePath}${suffix}`);
+    return false;
+  }
+
+  const existing = cacheEntryByPath(target.cache, relativePath);
+  if (existing) return false;
+
+  let source = "";
+  try {
+    source = readFileSync(fullPath, "utf-8");
+  } catch {
+    return false;
+  }
+
+  const parent = ensureWorkspaceParent(target.cache, relativePath);
+  for (const entry of parent.created) queueInstanceCreate(entry);
+
+  const uuid = nextUuid();
+  const entry: CacheEntry = {
+    uuid,
+    className,
+    name: pathLeafName(relativePath),
+    parentUuid: parent.uuid,
+    lastExportedAt: Date.now(),
+    relativePath,
+    source,
+  };
+  target.cache.entries[uuid] = entry;
+  addChild(target.cache, parent.uuid, uuid);
+  saveCache(cacheDir, target.key, target.cache);
+  queueScriptCreate(entry);
+  logger.info(`New script imported from VSCode: ${relativePath}${suffix}`);
+  return true;
+}
+
+function ingestUntrackedInstance(fullPath: string, srcDir: string, cacheDir: string, preferredKey?: CacheKey): boolean {
+  const target = getWritableCache(cacheDir, preferredKey);
+  if (!target) {
+    logger.debug(`Changed instance JSON UUID not in cache: ${fullPath}`);
+    return false;
+  }
+
+  const relativePath = relativePathFromWorkspaceFile(srcDir, fullPath, INSTANCE_JSON_EXTENSION);
+  const looseData = readLooseInstanceJson(fullPath);
+  if (!looseData) {
+    logger.debug(`Invalid instance JSON changed: ${fullPath}`);
+    return false;
+  }
+  if (!looseData.className) {
+    logger.warn(`Instance JSON missing className: ${fullPath}`);
+    return false;
+  }
+
+  if (looseData.uuid && target.cache.entries[looseData.uuid]) return false;
+  const existing = cacheEntryByPath(target.cache, relativePath);
+  if (existing) return false;
+
+  const parent = ensureWorkspaceParent(target.cache, relativePath);
+  for (const entry of parent.created) queueInstanceCreate(entry);
+
+  const instance: InstanceJson = {
+    uuid: looseData.uuid || nextUuid(),
+    className: looseData.className,
+    name: looseData.name || pathLeafName(relativePath),
+    properties: looseData.properties || {},
+    attributes: looseData.attributes || {},
+    tags: looseData.tags || [],
+    children: looseData.children || [],
+  };
+
+  const entry = entryFromInstance(relativePath, parent.uuid, instance);
+  target.cache.entries[instance.uuid] = entry;
+  addChild(target.cache, parent.uuid, instance.uuid);
+  saveCache(cacheDir, target.key, target.cache);
+
+  const written = writeInstanceJsonFile(srcDir, relativePath, instance);
+  if (written) markFileWritten(written);
+  queueInstanceCreate(entry);
+  logger.info(`New instance imported from VSCode: ${relativePath}${INSTANCE_JSON_EXTENSION}`);
+  return true;
+}
+
 function processScriptFileChange(fullPath: string, srcDir: string, cacheDir: string): void {
   if (!existsSync(fullPath)) return;
 
@@ -282,7 +625,7 @@ function processScriptFileChange(fullPath: string, srcDir: string, cacheDir: str
   const ref = lookup.get(scriptLookupKey(relativePath, className));
 
   if (!ref) {
-    logger.debug(`Changed script not in cache: ${relativePath}${suffix}`);
+    ingestUntrackedScript(fullPath, srcDir, cacheDir, relativePath, className, suffix);
     return;
   }
 
@@ -307,6 +650,7 @@ function processScriptFileChange(fullPath: string, srcDir: string, cacheDir: str
       type: "script",
       content,
       name,
+      parentUuid: ref.entry.parentUuid,
     });
     logger.info(`Script changed: ${relativePath}${suffix} -> queued for sync`);
   } catch {
@@ -319,13 +663,13 @@ function processInstanceJsonChange(fullPath: string, srcDir: string, cacheDir: s
 
   const data = readInstanceJsonFile(fullPath);
   if (!data) {
-    logger.debug(`Invalid instance JSON changed: ${fullPath}`);
+    ingestUntrackedInstance(fullPath, srcDir, cacheDir);
     return;
   }
 
   const ref = findCacheEntry(cacheDir, data.uuid);
   if (!ref) {
-    logger.debug(`Changed instance JSON UUID not in cache: ${data.uuid}`);
+    ingestUntrackedInstance(fullPath, srcDir, cacheDir);
     return;
   }
 
@@ -393,17 +737,20 @@ function processInstanceJsonChange(fullPath: string, srcDir: string, cacheDir: s
     type: "instance",
     data: normalizedData,
     name: normalizedData.name,
+    parentUuid: ref.entry.parentUuid,
   });
   logger.info(`Instance changed: ${relativePath}${INSTANCE_JSON_EXTENSION} -> queued for sync`);
 }
 
-function reconcileWorkspace(srcDir: string, cacheDir: string): void {
-  if (!existsSync(srcDir) || !existsSync(cacheDir)) return;
+export function reconcileWorkspace(srcDir: string, cacheDir: string, preferredKey?: CacheKey): void {
+  if (!existsSync(srcDir)) return;
 
   const workspace = scanWorkspace(srcDir);
-  for (const instancePath of workspace.instanceJsonFiles) {
-    if (!wasRecentlyWritten(instancePath)) {
-      processInstanceJsonChange(instancePath, srcDir, cacheDir);
+  ingestWorkspaceFolders(workspace.folderPaths, cacheDir, preferredKey);
+
+  for (const instanceFile of workspace.instanceJsonFiles) {
+    if (!wasRecentlyWritten(instanceFile.fullPath)) {
+      processInstanceJsonChange(instanceFile.fullPath, srcDir, cacheDir);
     }
   }
 
@@ -450,6 +797,7 @@ function reconcileWorkspace(srcDir: string, cacheDir: string): void {
         type: "script",
         content,
         name,
+        parentUuid: ref.entry.parentUuid,
       });
       logger.info(`Script renamed: ${ref.entry.relativePath} -> ${candidate.relativePath}`);
 
@@ -459,22 +807,39 @@ function reconcileWorkspace(srcDir: string, cacheDir: string): void {
       logger.debug(`Error reading renamed script: ${candidate.relativePath}`);
     }
   }
+
+  for (const file of untrackedFiles) {
+    ingestUntrackedScript(file.fullPath, srcDir, cacheDir, file.relativePath, file.className, scriptExtension(file.className), preferredKey);
+  }
+
+  queueDeletedWorkspaceEntries(srcDir, cacheDir, preferredKey);
 }
 
-function scanWorkspace(srcDir: string): { scriptFiles: WorkspaceScriptFile[]; instanceJsonFiles: string[] } {
+function scanWorkspace(srcDir: string): {
+  scriptFiles: WorkspaceScriptFile[];
+  instanceJsonFiles: WorkspaceInstanceFile[];
+  folderPaths: string[];
+} {
   const scriptFiles: WorkspaceScriptFile[] = [];
-  const instanceJsonFiles: string[] = [];
+  const instanceJsonFiles: WorkspaceInstanceFile[] = [];
+  const folderPaths: string[] = [];
 
   function traverse(currentDir: string): void {
     for (const entry of readdirSync(currentDir, { withFileTypes: true })) {
       const fullPath = resolve(currentDir, entry.name);
       if (entry.isDirectory()) {
+        const relPath = normalizeWorkspacePath(relative(srcDir, fullPath));
+        if (relPath) folderPaths.push(relPath);
         traverse(fullPath);
         continue;
       }
 
       if (entry.name.endsWith(INSTANCE_JSON_EXTENSION)) {
-        instanceJsonFiles.push(fullPath);
+        instanceJsonFiles.push({
+          fullPath,
+          relativePath: relativePathFromWorkspaceFile(srcDir, fullPath, INSTANCE_JSON_EXTENSION),
+          data: readLooseInstanceJson(fullPath),
+        });
         continue;
       }
 
@@ -491,7 +856,7 @@ function scanWorkspace(srcDir: string): { scriptFiles: WorkspaceScriptFile[]; in
   }
 
   traverse(srcDir);
-  return { scriptFiles, instanceJsonFiles };
+  return { scriptFiles, instanceJsonFiles, folderPaths };
 }
 
 function findRenameCandidate(

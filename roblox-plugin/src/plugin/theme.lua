@@ -1,17 +1,20 @@
 local Theme = {}
 
 Theme.Colors = {
-	Background = Color3.fromRGB(24, 24, 27),
-	Surface = Color3.fromRGB(32, 32, 36),
-	SurfaceHover = Color3.fromRGB(42, 42, 48),
-	Border = Color3.fromRGB(55, 55, 62),
-	Text = Color3.fromRGB(228, 228, 231),
-	TextMuted = Color3.fromRGB(140, 140, 150),
-	AccentYellow = Color3.fromRGB(250, 204, 21),
-	AccentBlue = Color3.fromRGB(56, 189, 248),
-	Error = Color3.fromRGB(239, 68, 68),
-	Success = Color3.fromRGB(34, 197, 94),
-	Warning = Color3.fromRGB(234, 179, 8),
+	Background = Color3.fromRGB(10, 14, 22),
+	Surface = Color3.fromRGB(26, 34, 48),
+	SurfaceHover = Color3.fromRGB(38, 50, 70),
+	Glass = Color3.fromRGB(30, 40, 58),
+	GlassSoft = Color3.fromRGB(18, 24, 36),
+	Border = Color3.fromRGB(105, 130, 165),
+	Text = Color3.fromRGB(238, 246, 255),
+	TextMuted = Color3.fromRGB(155, 172, 196),
+	AccentYellow = Color3.fromRGB(255, 210, 92),
+	AccentBlue = Color3.fromRGB(93, 214, 255),
+	AccentPink = Color3.fromRGB(255, 122, 198),
+	Error = Color3.fromRGB(255, 90, 112),
+	Success = Color3.fromRGB(79, 224, 163),
+	Warning = Color3.fromRGB(255, 190, 84),
 }
 
 Theme.Font = {
@@ -26,7 +29,7 @@ Theme.Size = {
 	TextLarge = 15,
 	Padding = 8,
 	PaddingSmall = 4,
-	BorderRadius = 6,
+	BorderRadius = 10,
 	RowHeight = 28,
 	IconSize = 16,
 }

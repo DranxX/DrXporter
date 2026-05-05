@@ -6,6 +6,10 @@ local Logger = require(script.Parent.logger)
 local Properties = require(script.Parent.serializer.properties)
 
 local ImportService = {}
+local SERVICE_SET = {}
+for _, serviceName in Constants.SERVICE_NAMES do
+	SERVICE_SET[serviceName] = true
+end
 
 local function applyAttributes(target, attributes)
 	if not attributes then return end
@@ -100,10 +104,90 @@ function ImportService.findByUuid(uuid)
 	return nil
 end
 
-function ImportService.importFromBridge(requestedUuids)
+local function findParentForData(data)
+	if data.parentUuid then
+		local parent = ImportService.findByUuid(data.parentUuid)
+		if parent then return parent end
+	end
+
+	if data.className and SERVICE_SET[data.className] then
+		local ok, svc = pcall(function()
+			return game:GetService(data.className)
+		end)
+		if ok and svc then return svc end
+	end
+
+	local ok, workspace = pcall(function()
+		return game:GetService("Workspace")
+	end)
+	if ok and workspace then return workspace end
+	return nil
+end
+
+local function createInstanceForData(data)
+	if not data.uuid or not data.className then return nil end
+
+	if SERVICE_SET[data.className] then
+		local ok, svc = pcall(function()
+			return game:GetService(data.className)
+		end)
+		if ok and svc then
+			UuidService.setUuid(svc, data.uuid)
+			return svc
+		end
+		return nil
+	end
+
+	local parent = findParentForData(data)
+	if not parent then return nil end
+
+	local ok, inst = pcall(function()
+		return Instance.new(data.className)
+	end)
+	if not ok or not inst then
+		Logger.warn("Cannot create instance class from VSCode: " .. tostring(data.className))
+		return nil
+	end
+
+	inst.Name = data.name or data.className
+	UuidService.setUuid(inst, data.uuid)
+	inst.Parent = parent
+	return inst
+end
+
+local function deleteMissingFromImport(incoming)
+	local deleted = 0
+
+	local function visit(parent)
+		for _, child in parent:GetChildren() do
+			visit(child)
+			local uuid = UuidService.getUuid(child)
+			if uuid and not incoming[uuid] and not SERVICE_SET[child.ClassName] then
+				pcall(function()
+					child:Destroy()
+					deleted += 1
+				end)
+			end
+		end
+	end
+
+	for _, serviceName in Constants.SERVICE_NAMES do
+		local ok, svc = pcall(function()
+			return game:GetService(serviceName)
+		end)
+		if ok and svc then
+			visit(svc)
+		end
+	end
+
+	return deleted
+end
+
+function ImportService.importFromBridge(requestedUuids, options)
+	options = options or {}
 	Logger.info("Starting import for " .. #requestedUuids .. " UUIDs")
 
-	local payload = BridgeProtocol.createImportPayload(requestedUuids)
+	local payload = BridgeProtocol.createImportPayload(requestedUuids, options.all == true, options.force == true)
 	local response, err = BridgeClient.request("import/pull", payload.payload)
 
 	if not response then
@@ -123,23 +207,37 @@ function ImportService.importFromBridge(requestedUuids)
 	end
 
 	local applied = 0
-
-	if data.scripts then
-		for _, scriptData in data.scripts do
-			local ok = ImportService.applyScript(scriptData)
-			if ok then applied = applied + 1 end
-		end
-	end
+	local incoming = {}
 
 	if data.instances then
 		for _, instanceData in data.instances do
+			if instanceData.uuid then incoming[instanceData.uuid] = true end
 			local ok = ImportService.applyInstance(instanceData)
 			if ok then applied = applied + 1 end
 		end
 	end
 
+	if data.scripts then
+		for _, scriptData in data.scripts do
+			if scriptData.uuid then incoming[scriptData.uuid] = true end
+			local ok = ImportService.applyScript(scriptData)
+			if ok then applied = applied + 1 end
+		end
+	end
+
+	if data.force then
+		local deleted = deleteMissingFromImport(incoming)
+		if deleted > 0 then
+			Logger.warn("Force import removed " .. deleted .. " Roblox item(s)")
+		end
+	end
+
 	Logger.info("Import completed: " .. applied .. " items applied")
 	return true, nil
+end
+
+function ImportService.importAllFromBridge(force)
+	return ImportService.importFromBridge({}, { all = true, force = force == true })
 end
 
 function ImportService.applyInstance(instanceData)
@@ -148,8 +246,11 @@ function ImportService.applyInstance(instanceData)
 
 	local target = ImportService.findByUuid(uuid)
 	if not target then
-		Logger.warn("Instance not found for UUID: " .. uuid)
-		return false
+		target = createInstanceForData(instanceData)
+		if not target then
+			Logger.warn("Instance not found for UUID: " .. uuid)
+			return false
+		end
 	end
 
 	if instanceData.name and instanceData.name ~= target.Name then
@@ -169,8 +270,16 @@ function ImportService.applyScript(scriptData)
 
 	local target = ImportService.findByUuid(uuid)
 	if not target then
-		Logger.warn("Script not found for UUID: " .. uuid)
-		return false
+		target = createInstanceForData({
+			uuid = uuid,
+			className = scriptData.className or "ModuleScript",
+			name = scriptData.name or "ModuleScript",
+			parentUuid = scriptData.parentUuid,
+		})
+		if not target then
+			Logger.warn("Script not found for UUID: " .. uuid)
+			return false
+		end
 	end
 
 	if scriptData.source then

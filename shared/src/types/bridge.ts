@@ -54,6 +54,8 @@ export interface ExportPushPayload {
 export interface ImportPullPayload {
   cacheKey: CacheKey;
   requestedUuids: string[];
+  all?: boolean;
+  force?: boolean;
 }
 
 export interface ImportPullResponse {

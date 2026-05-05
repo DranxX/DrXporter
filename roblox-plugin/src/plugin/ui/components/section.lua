@@ -7,8 +7,26 @@ function Section.create(props)
 	frame.Name = props.name or "Section"
 	frame.Size = props.size or UDim2.new(1, 0, 0, 0)
 	frame.AutomaticSize = Enum.AutomaticSize.Y
-	frame.BackgroundTransparency = 1
+	frame.BackgroundColor3 = Theme.Colors.Glass
+	frame.BackgroundTransparency = 0.22
 	frame.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, Theme.Size.BorderRadius)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Colors.Border
+	stroke.Transparency = 0.62
+	stroke.Thickness = 1
+	stroke.Parent = frame
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, Theme.Size.Padding)
+	padding.PaddingBottom = UDim.new(0, Theme.Size.Padding)
+	padding.PaddingLeft = UDim.new(0, Theme.Size.Padding)
+	padding.PaddingRight = UDim.new(0, Theme.Size.Padding)
+	padding.Parent = frame
 
 	local header = Instance.new("TextLabel")
 	header.Name = "Header"
@@ -24,7 +42,7 @@ function Section.create(props)
 	local content = Instance.new("Frame")
 	content.Name = "Content"
 	content.Size = UDim2.new(1, 0, 0, 0)
-	content.Position = UDim2.new(0, 0, 0, 24)
+	content.Position = UDim2.new(0, 0, 0, 26)
 	content.AutomaticSize = Enum.AutomaticSize.Y
 	content.BackgroundTransparency = 1
 	content.Parent = frame

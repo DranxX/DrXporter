@@ -13,11 +13,21 @@ function Checkbox.create(props)
 	box.Name = "Box"
 	box.Size = UDim2.new(0, 16, 0, 16)
 	box.Position = UDim2.new(0, 0, 0.5, -8)
-	box.BackgroundColor3 = Theme.Colors.Surface
-	box.BorderSizePixel = 1
-	box.BorderColor3 = Theme.Colors.Border
+	box.BackgroundColor3 = Theme.Colors.GlassSoft
+	box.BackgroundTransparency = 0.12
+	box.BorderSizePixel = 0
 	box.Text = ""
 	box.Parent = frame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 5)
+	corner.Parent = box
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Colors.Border
+	stroke.Transparency = 0.58
+	stroke.Thickness = 1
+	stroke.Parent = box
 
 	local checkMark = Instance.new("TextLabel")
 	checkMark.Name = "Check"

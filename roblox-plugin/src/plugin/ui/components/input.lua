@@ -6,13 +6,19 @@ function Input.create(props)
 	local frame = Instance.new("Frame")
 	frame.Name = props.name or "Input"
 	frame.Size = props.size or UDim2.new(1, 0, 0, 32)
-	frame.BackgroundColor3 = Theme.Colors.Surface
-	frame.BorderSizePixel = 1
-	frame.BorderColor3 = Theme.Colors.Border
+	frame.BackgroundColor3 = Theme.Colors.GlassSoft
+	frame.BackgroundTransparency = 0.18
+	frame.BorderSizePixel = 0
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, Theme.Size.BorderRadius)
 	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Colors.Border
+	stroke.Transparency = 0.66
+	stroke.Thickness = 1
+	stroke.Parent = frame
 
 	local textBox = Instance.new("TextBox")
 	textBox.Name = "TextBox"

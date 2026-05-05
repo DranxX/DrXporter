@@ -37,10 +37,12 @@ function BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, a
 	})
 end
 
-function BridgeProtocol.createImportPayload(requestedUuids)
+function BridgeProtocol.createImportPayload(requestedUuids, all, force)
 	return BridgeProtocol.createRequest("import-pull", {
 		cacheKey = State.getCacheKey(),
 		requestedUuids = requestedUuids,
+		all = all == true,
+		force = force == true,
 	})
 end
 
