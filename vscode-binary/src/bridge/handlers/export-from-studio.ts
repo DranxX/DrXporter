@@ -5,7 +5,7 @@ import { INSTANCE_JSON_EXTENSION, isFolderClass, isScriptClass, isServiceClass }
 import { CacheStore } from "../../cache/cache-store";
 import { clearPendingChanges, invalidateLookupCache, markFileWritten, startWatcher, stopWatcher } from "../watcher";
 import { createLogger } from "../../logging/logger";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   joinRelativePath,
@@ -13,6 +13,8 @@ import {
   removeWorkspaceFile,
   scriptExtension,
   scriptTypeForClass,
+  workspaceFilePath,
+  workspaceFolderPath,
   writeInstanceJsonFile,
   writeScriptFile,
 } from "../sync-files";
@@ -22,6 +24,90 @@ const logger = createLogger("export");
 function artifactKey(entry: CacheEntry): string {
   const suffix = isScriptClass(entry.className) ? scriptExtension(entry.className) : INSTANCE_JSON_EXTENSION;
   return `${entry.relativePath}\0${suffix}`;
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function instanceEntryChanged(
+  oldEntry: CacheEntry | undefined,
+  relativePath: string,
+  parentUuid: string | null,
+  instance: InstanceJson,
+): boolean {
+  if (!oldEntry) return true;
+  return (
+    oldEntry.uuid !== instance.uuid ||
+    oldEntry.className !== instance.className ||
+    oldEntry.name !== instance.name ||
+    oldEntry.parentUuid !== parentUuid ||
+    oldEntry.relativePath !== relativePath ||
+    stableStringify(oldEntry.properties || {}) !== stableStringify(instance.properties || {}) ||
+    stableStringify(oldEntry.attributes || {}) !== stableStringify(instance.attributes || {}) ||
+    stableStringify(oldEntry.tags || []) !== stableStringify(instance.tags || []) ||
+    stableStringify(oldEntry.children || []) !== stableStringify(instance.children || [])
+  );
+}
+
+function scriptEntryChanged(
+  oldEntry: CacheEntry | undefined,
+  relativePath: string,
+  parentUuid: string | null,
+  script: ScriptDescriptor,
+): boolean {
+  if (!oldEntry) return true;
+  return (
+    oldEntry.uuid !== script.uuid ||
+    oldEntry.className !== script.className ||
+    oldEntry.name !== script.name ||
+    oldEntry.parentUuid !== parentUuid ||
+    oldEntry.relativePath !== relativePath ||
+    (oldEntry.source || "") !== (script.source || "")
+  );
+}
+
+function instanceFileNeedsWrite(srcDir: string, relativePath: string, instance: InstanceJson, forceOverwrite: boolean): boolean {
+  if (forceOverwrite) return true;
+
+  if (isFolderClass(instance.className)) {
+    const folderPath = workspaceFolderPath(srcDir, relativePath);
+    const legacyPath = workspaceFilePath(srcDir, relativePath, INSTANCE_JSON_EXTENSION);
+    return !folderPath || !existsSync(folderPath) || Boolean(legacyPath && existsSync(legacyPath));
+  }
+
+  const filePath = workspaceFilePath(srcDir, relativePath, INSTANCE_JSON_EXTENSION);
+  if (!filePath || !existsSync(filePath)) return true;
+
+  try {
+    return readFileSync(filePath, "utf-8") !== `${JSON.stringify(instance, null, 2)}\n`;
+  } catch {
+    return true;
+  }
+}
+
+function scriptFileNeedsWrite(srcDir: string, relativePath: string, script: ScriptDescriptor, forceOverwrite: boolean): boolean {
+  if (forceOverwrite) return true;
+
+  const ext = scriptExtension(script.className);
+  const filePath = workspaceFilePath(srcDir, relativePath, ext);
+  if (!filePath || !existsSync(filePath)) return true;
+
+  try {
+    return readFileSync(filePath, "utf-8") !== (script.source || "");
+  } catch {
+    return true;
+  }
 }
 
 function buildPathMap(
@@ -143,6 +229,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
   const srcDir = resolve(process.cwd(), "src");
   let filesWritten = 0;
   let staleEntriesRemoved = 0;
+  let cacheDirty = false;
   const folderPathsToRemove = new Set<string>();
   const fullSync = payload.fullSync === true || payload.forceOverwrite === true;
 
@@ -160,7 +247,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
   for (const inst of payload.instances || []) {
     const relPath = pathMap.get(inst.uuid) || joinRelativePath(null, inst.name);
     const oldEntry = cache.entries[inst.uuid];
-    if (oldEntry?.relativePath && oldEntry.relativePath !== relPath) {
+    if (oldEntry?.relativePath && (oldEntry.relativePath !== relPath || oldEntry.className !== inst.className)) {
       try {
         if (removeWorkspaceFile(srcDir, oldEntry.relativePath, oldEntry.className)) {
           logger.info(`Removed stale: src/${oldEntry.relativePath}`);
@@ -169,6 +256,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
           folderPathsToRemove.add(oldEntry.relativePath);
         }
       } catch {}
+      cacheDirty = true;
     }
 
     const instanceJson: InstanceJson = {
@@ -181,12 +269,15 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
       children: inst.children || [],
     };
 
+    const parentUuid = parentMap.get(inst.uuid) || null;
+    const entryChanged = instanceEntryChanged(oldEntry, relPath, parentUuid, instanceJson);
+    const fileNeedsWrite = instanceFileNeedsWrite(srcDir, relPath, instanceJson, payload.forceOverwrite === true);
     const entry: CacheEntry = {
       uuid: inst.uuid,
       className: inst.className,
       name: inst.name,
-      parentUuid: parentMap.get(inst.uuid) || null,
-      lastExportedAt: Date.now(),
+      parentUuid,
+      lastExportedAt: entryChanged || fileNeedsWrite ? Date.now() : oldEntry?.lastExportedAt || Date.now(),
       relativePath: relPath,
       properties: instanceJson.properties,
       attributes: instanceJson.attributes,
@@ -194,16 +285,21 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
       children: instanceJson.children,
     };
 
-    cache.entries[inst.uuid] = entry;
+    if (entryChanged || fileNeedsWrite) {
+      cache.entries[inst.uuid] = entry;
+      cacheDirty = true;
+    }
 
-    const fullPath = writeInstanceJsonFile(srcDir, relPath, instanceJson);
-    if (fullPath) {
-      markFileWritten(fullPath);
-      filesWritten++;
-      if (isFolderClass(inst.className)) {
-        logger.info(`Wrote folder: src/${relPath}/`);
-      } else {
-        logger.info(`Wrote: src/${relPath}.instance.json`);
+    if (fileNeedsWrite) {
+      const fullPath = writeInstanceJsonFile(srcDir, relPath, instanceJson);
+      if (fullPath) {
+        markFileWritten(fullPath);
+        filesWritten++;
+        if (isFolderClass(inst.className)) {
+          logger.info(`Wrote folder: src/${relPath}/`);
+        } else {
+          logger.info(`Wrote: src/${relPath}.instance.json`);
+        }
       }
     }
   }
@@ -213,7 +309,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
     const ext = scriptExtension(script.className);
 
     const oldEntry = cache.entries[script.uuid];
-    if (oldEntry?.relativePath && oldEntry.relativePath !== relPath) {
+    if (oldEntry?.relativePath && (oldEntry.relativePath !== relPath || oldEntry.className !== script.className)) {
       try {
         if (removeWorkspaceFile(srcDir, oldEntry.relativePath, oldEntry.className)) {
           const oldExt = scriptExtension(oldEntry.className);
@@ -223,29 +319,39 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
           folderPathsToRemove.add(oldEntry.relativePath);
         }
       } catch {}
+      cacheDirty = true;
     }
 
+    const parentUuid = parentMap.get(script.uuid) || null;
+    const scriptWithDefaults = {
+      ...script,
+      scriptType: script.scriptType || scriptTypeForClass(script.className),
+      source: script.source || "",
+    };
+    const entryChanged = scriptEntryChanged(oldEntry, relPath, parentUuid, scriptWithDefaults);
+    const fileNeedsWrite = scriptFileNeedsWrite(srcDir, relPath, scriptWithDefaults, payload.forceOverwrite === true);
     const entry: CacheEntry = {
       uuid: script.uuid,
       className: script.className,
       name: script.name,
-      parentUuid: parentMap.get(script.uuid) || null,
-      lastExportedAt: Date.now(),
+      parentUuid,
+      lastExportedAt: entryChanged || fileNeedsWrite ? Date.now() : oldEntry?.lastExportedAt || Date.now(),
       relativePath: relPath,
       source: script.source || "",
     };
 
-    cache.entries[script.uuid] = entry;
+    if (entryChanged || fileNeedsWrite) {
+      cache.entries[script.uuid] = entry;
+      cacheDirty = true;
+    }
 
-    const fullPath = writeScriptFile(srcDir, relPath, {
-      ...script,
-      scriptType: script.scriptType || scriptTypeForClass(script.className),
-      source: script.source || "",
-    });
-    if (fullPath) {
-      markFileWritten(fullPath);
-      filesWritten++;
-      logger.info(`Wrote: src/${relPath}${ext}`);
+    if (fileNeedsWrite) {
+      const fullPath = writeScriptFile(srcDir, relPath, scriptWithDefaults);
+      if (fullPath) {
+        markFileWritten(fullPath);
+        filesWritten++;
+        logger.info(`Wrote: src/${relPath}${ext}`);
+      }
     }
   }
 
@@ -276,6 +382,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
       }
 
       delete cache.entries[uuid];
+      cacheDirty = true;
       staleEntriesRemoved++;
     }
   }
@@ -283,15 +390,19 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
   for (const relPath of Array.from(folderPathsToRemove).sort((a, b) => b.length - a.length)) {
     if (removeWorkspaceFolderTree(srcDir, relPath)) {
       logger.info(`Removed folder tree: src/${relPath}/`);
+      cacheDirty = true;
     }
   }
-  store.save(cacheKey, cache);
-  invalidateLookupCache();
+
+  if (cacheDirty) {
+    store.save(cacheKey, cache);
+    invalidateLookupCache();
+  }
 
   startWatcher(srcDir, cacheDir);
 
   logger.info(
-    `Cache saved: ${Object.keys(cache.entries).length} entries | Files written: ${filesWritten} | Stale removed: ${staleEntriesRemoved}`,
+    `Cache ${cacheDirty ? "saved" : "unchanged"}: ${Object.keys(cache.entries).length} entries | Files written: ${filesWritten} | Stale removed: ${staleEntriesRemoved}`,
   );
 
   return {
