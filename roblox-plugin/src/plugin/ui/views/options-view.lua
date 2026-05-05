@@ -1,6 +1,7 @@
 local Theme = require(script.Parent.Parent.Parent.theme)
 local Section = require(script.Parent.Parent.components.section)
 local Button = require(script.Parent.Parent.components.button)
+local Checkbox = require(script.Parent.Parent.components.checkbox)
 local ExportService = require(script.Parent.Parent.Parent["export-service"])
 local ImportService = require(script.Parent.Parent.Parent["import-service"])
 local SyncService = require(script.Parent.Parent.Parent["sync-service"])
@@ -89,6 +90,53 @@ function OptionsView.render(parent)
 		parent = section.content,
 	})
 	importBtn.LayoutOrder = 6
+
+	local settingsSection = Section.create({
+		name = "SettingsSection",
+		title = "Settings",
+		parent = parent,
+	})
+
+	local settingsStatus = Instance.new("TextLabel")
+	settingsStatus.Name = "SettingsStatus"
+	settingsStatus.Size = UDim2.new(1, 0, 0, 20)
+	settingsStatus.BackgroundTransparency = 1
+	settingsStatus.Font = Theme.Font.Default
+	settingsStatus.TextSize = Theme.Size.TextSmall
+	settingsStatus.TextColor3 = Theme.Colors.TextMuted
+	settingsStatus.TextXAlignment = Enum.TextXAlignment.Left
+	settingsStatus.Text = ""
+	settingsStatus.Visible = false
+	settingsStatus.LayoutOrder = 3
+	settingsStatus.Parent = settingsSection.content
+
+	local quietOutputToggle = Checkbox.create({
+		name = "QuietOutputToggle",
+		label = "Quiet Studio Output",
+		checked = State.getSetting("quietOutput") ~= false,
+		parent = settingsSection.content,
+		onToggle = function(checked)
+			State.setSetting("quietOutput", checked)
+			settingsStatus.Visible = true
+			settingsStatus.TextColor3 = Theme.Colors.Success
+			settingsStatus.Text = checked and "Info logs hidden" or "Info logs visible"
+		end,
+	})
+	quietOutputToggle.frame.LayoutOrder = 1
+
+	local debugLogsToggle = Checkbox.create({
+		name = "DebugLogsToggle",
+		label = "Debug Logs",
+		checked = State.getSetting("debugLogs") == true,
+		parent = settingsSection.content,
+		onToggle = function(checked)
+			State.setSetting("debugLogs", checked)
+			settingsStatus.Visible = true
+			settingsStatus.TextColor3 = checked and Theme.Colors.Warning or Theme.Colors.Success
+			settingsStatus.Text = checked and "Debug logs enabled" or "Debug logs hidden"
+		end,
+	})
+	debugLogsToggle.frame.LayoutOrder = 2
 
 	local function showStatus(text, color)
 		statusLabel.Visible = true

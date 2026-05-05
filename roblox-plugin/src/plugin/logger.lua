@@ -1,8 +1,10 @@
 local Logger = {}
+local State = require(script.Parent.state)
 
 local LOG_PREFIX = "[DrXporter]"
 
 function Logger.info(message)
+	if State.getSetting("quietOutput") then return end
 	print(LOG_PREFIX, "[INFO]", message)
 end
 
@@ -15,6 +17,7 @@ function Logger.error(message)
 end
 
 function Logger.debug(message)
+	if not State.getSetting("debugLogs") then return end
 	print(LOG_PREFIX, "[DEBUG]", message)
 end
 

@@ -10,8 +10,38 @@ local _selectedUuids = {}
 local _ancestorUuids = {}
 local _diagnostics = {}
 local _listeners = {}
+local _settings = {
+	quietOutput = true,
+	debugLogs = false,
+}
 
 local MAX_DIAGNOSTICS = 100
+local SETTING_PREFIX = "DrXporter."
+
+local function loadPluginSetting(key, defaultValue)
+	if not _plugin then return defaultValue end
+
+	local ok, value = pcall(function()
+		return _plugin:GetSetting(SETTING_PREFIX .. key)
+	end)
+	if ok and typeof(value) == typeof(defaultValue) then
+		return value
+	end
+	return defaultValue
+end
+
+local function savePluginSetting(key, value)
+	if not _plugin then return end
+	pcall(function()
+		_plugin:SetSetting(SETTING_PREFIX .. key, value)
+	end)
+end
+
+local function loadSettings()
+	for key, defaultValue in _settings do
+		_settings[key] = loadPluginSetting(key, defaultValue)
+	end
+end
 
 function State.on(event, callback)
 	if not _listeners[event] then
@@ -48,6 +78,8 @@ function State.setPlugin(plugin)
 	_plugin = plugin
 	_gameId = tostring(game.GameId)
 	_placeId = tostring(game.PlaceId)
+	loadSettings()
+	State._fire("settingsChanged", _settings)
 end
 
 function State.getPlugin()
@@ -82,6 +114,18 @@ end
 
 function State.getCacheKey()
 	return { gameId = _gameId, placeId = _placeId }
+end
+
+function State.getSetting(key)
+	return _settings[key]
+end
+
+function State.setSetting(key, value)
+	if _settings[key] == value then return end
+	_settings[key] = value
+	savePluginSetting(key, value)
+	State._fire("settingChanged", key, value)
+	State._fire("settingsChanged", _settings)
 end
 
 function State.getSelectedUuids()
