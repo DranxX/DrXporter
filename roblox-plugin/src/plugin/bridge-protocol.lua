@@ -25,13 +25,14 @@ function BridgeProtocol.createConnectPayload()
 	})
 end
 
-function BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids)
+function BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids, fullSync)
 	return BridgeProtocol.createRequest("export-push", {
 		cacheKey = State.getCacheKey(),
 		instances = instances,
 		scripts = scripts,
 		selectedUuids = selectedUuids,
 		ancestorUuids = ancestorUuids,
+		fullSync = fullSync == true,
 	})
 end
 

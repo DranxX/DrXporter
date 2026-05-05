@@ -122,6 +122,10 @@ export function isServiceClass(className: string): className is ServiceClassName
   return (SERVICE_CLASS_NAMES as readonly string[]).includes(className);
 }
 
+export function isFolderClass(className: string): className is "Folder" {
+  return className === "Folder";
+}
+
 export function isExportableClass(className: string): className is ExportableClassName {
   return (EXPORTABLE_CLASS_NAMES as readonly string[]).includes(className);
 }

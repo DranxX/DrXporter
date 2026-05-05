@@ -1,11 +1,18 @@
 import type { RouteResult } from "../router";
 import { parseRequest, createResponse, createErrorResponse } from "../protocol";
 import type { ImportPullPayload, InstanceJson, ScriptDescriptor } from "@drxporter/shared";
-import { isScriptClass, SCRIPT_EXTENSIONS } from "@drxporter/shared";
+import { INSTANCE_JSON_EXTENSION, isFolderClass, isScriptClass } from "@drxporter/shared";
 import { CacheStore } from "../../cache/cache-store";
 import { createLogger } from "../../logging/logger";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  instanceJsonFromEntry,
+  readInstanceJsonFile,
+  scriptDescriptorFromEntry,
+  scriptExtension,
+  workspaceFilePath,
+} from "../sync-files";
 
 const logger = createLogger("import");
 
@@ -38,33 +45,23 @@ export async function handleImportToStudio(body: string): Promise<RouteResult> {
     if (!relPath) continue;
 
     if (isScriptClass(entry.className)) {
-      const ext = SCRIPT_EXTENSIONS[entry.className] || ".lua";
-      const fullPath = resolve(srcDir, relPath + ext);
+      const ext = scriptExtension(entry.className);
+      const fullPath = workspaceFilePath(srcDir, relPath, ext);
 
-      let source = (entry as any).source || "";
-      if (existsSync(fullPath)) {
+      let source = entry.source || "";
+      if (fullPath && existsSync(fullPath)) {
         try {
           source = readFileSync(fullPath, "utf-8");
         } catch {}
       }
 
-      scripts.push({
-        uuid: entry.uuid,
-        name: entry.name,
-        scriptType: entry.className === "Script" ? "server" : entry.className === "LocalScript" ? "client" : "module",
-        source,
-        className: entry.className,
-      });
+      scripts.push(scriptDescriptorFromEntry(entry, source));
     } else {
-      instances.push({
-        uuid: entry.uuid,
-        className: entry.className,
-        name: entry.name,
-        properties: (entry as any).properties || {},
-        attributes: (entry as any).attributes || {},
-        tags: (entry as any).tags || [],
-        children: (entry as any).children || [],
-      });
+      const fullPath = isFolderClass(entry.className)
+        ? null
+        : workspaceFilePath(srcDir, relPath, INSTANCE_JSON_EXTENSION);
+      const fromFile = fullPath && existsSync(fullPath) ? readInstanceJsonFile(fullPath) : null;
+      instances.push(fromFile || instanceJsonFromEntry(entry));
     }
   }
 

@@ -3,6 +3,7 @@ local Section = require(script.Parent.Parent.components.section)
 local Button = require(script.Parent.Parent.components.button)
 local ExportService = require(script.Parent.Parent.Parent["export-service"])
 local ImportService = require(script.Parent.Parent.Parent["import-service"])
+local SyncService = require(script.Parent.Parent.Parent["sync-service"])
 local State = require(script.Parent.Parent.Parent.state)
 local Logger = require(script.Parent.Parent.Parent.logger)
 local Selection = game:GetService("Selection")
@@ -59,6 +60,16 @@ function OptionsView.render(parent)
 	})
 	exportScriptsBtn.LayoutOrder = 3
 
+	local refreshBtn = Button.create({
+		name = "RefreshButton",
+		text = "REFRESH FROM ROBLOX",
+		color = Theme.Colors.Success,
+		textColor = Theme.Colors.Background,
+		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
+		parent = section.content,
+	})
+	refreshBtn.LayoutOrder = 4
+
 	local importBtn = Button.create({
 		name = "ImportButton",
 		text = "IMPORT SELECTED",
@@ -67,7 +78,7 @@ function OptionsView.render(parent)
 		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
 		parent = section.content,
 	})
-	importBtn.LayoutOrder = 4
+	importBtn.LayoutOrder = 5
 
 	local function showStatus(text, color)
 		statusLabel.Visible = true
@@ -138,6 +149,26 @@ function OptionsView.render(parent)
 				showStatus("✗ Export failed: " .. tostring(err), Theme.Colors.Error)
 			end
 			exportScriptsBtn.Text = "EXPORT SCRIPTS ONLY"
+		end)
+	end)
+
+	refreshBtn.MouseButton1Click:Connect(function()
+		if not State.isConnected() then
+			showStatus("✗ Not connected to bridge", Theme.Colors.Error)
+			return
+		end
+
+		refreshBtn.Text = "REFRESHING..."
+		showStatus("Syncing Roblox snapshot to VSCode...", Theme.Colors.TextMuted)
+
+		task.spawn(function()
+			local success, err = SyncService.refreshAll()
+			if success then
+				showStatus("✓ Refreshed from Roblox", Theme.Colors.Success)
+			else
+				showStatus("✗ Refresh failed: " .. tostring(err), Theme.Colors.Error)
+			end
+			refreshBtn.Text = "REFRESH FROM ROBLOX"
 		end)
 	end)
 

@@ -25,7 +25,7 @@ export type PropertyValue =
   | { type: "CFrame"; value: number[] }
   | { type: "UDim2"; value: [number, number, number, number] }
   | { type: "UDim"; value: [number, number] }
-  | { type: "Enum"; value: number }
+  | { type: "Enum"; value: number; enumType?: string }
   | { type: "BrickColor"; value: number }
   | { type: "Ref"; value: string | null }
   | { type: "unknown"; value: unknown };

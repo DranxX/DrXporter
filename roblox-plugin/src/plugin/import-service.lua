@@ -3,8 +3,77 @@ local UuidService = require(script.Parent["uuid-service"])
 local BridgeClient = require(script.Parent["bridge-client"])
 local BridgeProtocol = require(script.Parent["bridge-protocol"])
 local Logger = require(script.Parent.logger)
+local Properties = require(script.Parent.serializer.properties)
 
 local ImportService = {}
+
+local function applyAttributes(target, attributes)
+	if not attributes then return end
+
+	local ok, existing = pcall(function()
+		return target:GetAttributes()
+	end)
+	if ok and existing then
+		for key in existing do
+			if key ~= Constants.UUID_ATTRIBUTE and attributes[key] == nil then
+				pcall(function()
+					target:SetAttribute(key, nil)
+				end)
+			end
+		end
+	end
+
+	for key, value in attributes do
+		if key ~= Constants.UUID_ATTRIBUTE then
+			pcall(function()
+				target:SetAttribute(key, value)
+			end)
+		end
+	end
+end
+
+local function applyTags(target, tags)
+	if not tags then return end
+
+	local incoming = {}
+	for _, tag in tags do
+		incoming[tag] = true
+	end
+
+	local ok, existing = pcall(function()
+		return target:GetTags()
+	end)
+	if ok and existing then
+		for _, tag in existing do
+			if not incoming[tag] then
+				pcall(function()
+					target:RemoveTag(tag)
+				end)
+			end
+		end
+	end
+
+	for tag in incoming do
+		pcall(function()
+			if not target:HasTag(tag) then
+				target:AddTag(tag)
+			end
+		end)
+	end
+end
+
+local function applyProperties(target, properties)
+	if not properties then return end
+
+	for propertyName, propertyData in properties do
+		local value = Properties.deserializeValue(propertyData)
+		if value ~= nil then
+			pcall(function()
+				target[propertyName] = value
+			end)
+		end
+	end
+end
 
 function ImportService.findByUuid(uuid)
 	local function search(parent)
@@ -87,23 +156,9 @@ function ImportService.applyInstance(instanceData)
 		pcall(function() target.Name = instanceData.name end)
 	end
 
-	if instanceData.attributes then
-		for key, value in instanceData.attributes do
-			if key ~= Constants.UUID_ATTRIBUTE then
-				pcall(function() target:SetAttribute(key, value) end)
-			end
-		end
-	end
-
-	if instanceData.tags then
-		for _, tag in instanceData.tags do
-			pcall(function()
-				if not target:HasTag(tag) then
-					target:AddTag(tag)
-				end
-			end)
-		end
-	end
+	applyProperties(target, instanceData.properties)
+	applyAttributes(target, instanceData.attributes)
+	applyTags(target, instanceData.tags)
 
 	return true
 end

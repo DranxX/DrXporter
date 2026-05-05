@@ -1,4 +1,5 @@
 local Properties = {}
+local PropertySelector = require(script.Parent.Parent["property-selector"])
 
 local SERIALIZABLE_TYPES = {
 	string = true,
@@ -6,8 +7,96 @@ local SERIALIZABLE_TYPES = {
 	boolean = true,
 }
 
+local CLASS_PROPERTIES = {
+	Decal = { "Texture", "Color3", "Transparency", "Face" },
+	Texture = { "Texture", "Color3", "Transparency", "Face", "StudsPerTileU", "StudsPerTileV" },
+	Sound = { "SoundId", "Volume", "PlaybackSpeed", "Looped" },
+}
+
+local ISA_PROPERTIES = {
+	BasePart = {
+		"Anchored",
+		"CanCollide",
+		"CanTouch",
+		"CanQuery",
+		"CastShadow",
+		"Color",
+		"BrickColor",
+		"Material",
+		"Reflectance",
+		"Transparency",
+		"Size",
+		"Position",
+		"Orientation",
+	},
+	GuiObject = {
+		"Visible",
+		"ZIndex",
+		"LayoutOrder",
+		"Size",
+		"Position",
+		"AnchorPoint",
+		"BackgroundColor3",
+		"BackgroundTransparency",
+		"BorderSizePixel",
+	},
+	TextLabel = { "Text", "TextColor3", "TextTransparency", "TextSize", "RichText" },
+	TextButton = { "Text", "TextColor3", "TextTransparency", "TextSize", "RichText", "AutoButtonColor" },
+	TextBox = { "Text", "TextColor3", "TextTransparency", "TextSize", "RichText", "ClearTextOnFocus" },
+	ImageLabel = { "Image", "ImageColor3", "ImageTransparency", "ScaleType" },
+	ImageButton = { "Image", "ImageColor3", "ImageTransparency", "ScaleType", "AutoButtonColor" },
+	Light = { "Enabled", "Brightness", "Color", "Range", "Shadows" },
+}
+
+local function addUnique(list, seen, propertyName)
+	if seen[propertyName] then return end
+	seen[propertyName] = true
+	table.insert(list, propertyName)
+end
+
+local function getPropertyNames(instance)
+	local selected = PropertySelector.getProperties(instance.ClassName)
+	if selected and #selected > 0 then
+		return selected
+	end
+
+	local names = {}
+	local seen = {}
+
+	local classProps = CLASS_PROPERTIES[instance.ClassName]
+	if classProps then
+		for _, propertyName in classProps do
+			addUnique(names, seen, propertyName)
+		end
+	end
+
+	for className, props in ISA_PROPERTIES do
+		local ok, isA = pcall(function()
+			return instance:IsA(className)
+		end)
+		if ok and isA then
+			for _, propertyName in props do
+				addUnique(names, seen, propertyName)
+			end
+		end
+	end
+
+	return names
+end
+
 function Properties.serialize(instance)
 	local result = {}
+	for _, propertyName in getPropertyNames(instance) do
+		local ok, value = pcall(function()
+			return instance[propertyName]
+		end)
+		if ok then
+			local serialized = Properties.serializeValue(value)
+			if serialized then
+				result[propertyName] = serialized
+			end
+		end
+	end
 	return result
 end
 
@@ -43,7 +132,8 @@ function Properties.serializeValue(value)
 	end
 
 	if t == "EnumItem" then
-		return { type = "Enum", value = value.Value }
+		local enumType = tostring(value.EnumType):gsub("^Enum%.", "")
+		return { type = "Enum", value = value.Value, enumType = enumType }
 	end
 
 	if t == "CFrame" then
@@ -89,6 +179,17 @@ function Properties.deserializeValue(propData)
 
 	if t == "CFrame" then
 		return CFrame.new(unpack(v))
+	end
+
+	if t == "Enum" and propData.enumType then
+		local enum = Enum[propData.enumType]
+		if enum then
+			for _, item in enum:GetEnumItems() do
+				if item.Value == v then
+					return item
+				end
+			end
+		end
 	end
 
 	return nil

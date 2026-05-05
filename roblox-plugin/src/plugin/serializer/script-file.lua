@@ -14,11 +14,16 @@ function ScriptFileSerializer.serialize(instance)
 		scriptType = "client"
 	end
 
+	local source = ""
+	pcall(function()
+		source = instance.Source
+	end)
+
 	return {
 		uuid = uuid,
 		name = instance.Name,
 		scriptType = scriptType,
-		source = instance.Source,
+		source = source,
 		className = instance.ClassName,
 	}
 end

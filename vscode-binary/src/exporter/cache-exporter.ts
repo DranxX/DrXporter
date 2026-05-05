@@ -1,6 +1,6 @@
 import type { PlaceCache, CacheEntry, InstanceJson, ScriptDescriptor } from "@drxporter/shared";
-import { isScriptClass, SCRIPT_EXTENSIONS, INSTANCE_JSON_EXTENSION } from "@drxporter/shared";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { isScriptClass, isFolderClass, SCRIPT_EXTENSIONS, INSTANCE_JSON_EXTENSION } from "@drxporter/shared";
+import { writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { createLogger } from "../logging/logger";
 
@@ -36,6 +36,13 @@ export function exportFromCache(cache: PlaceCache, outputRoot: string): number {
       const source = (entry as any).source || "";
       writeFileSync(fullPath, source, "utf-8");
       logger.info(`Wrote script: ${relPath}${ext}`);
+      count++;
+    } else if (isFolderClass(entry.className)) {
+      const dirPath = resolve(srcDir, relPath);
+      const legacyPath = resolve(srcDir, relPath + INSTANCE_JSON_EXTENSION);
+      if (existsSync(legacyPath)) unlinkSync(legacyPath);
+      if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+      logger.info(`Wrote folder: ${relPath}/`);
       count++;
     } else {
       const fullPath = resolve(srcDir, relPath + INSTANCE_JSON_EXTENSION);

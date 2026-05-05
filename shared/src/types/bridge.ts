@@ -30,7 +30,10 @@ export type BridgeAction =
   | "validate"
   | "health"
   | "cache-get"
-  | "cache-clear";
+  | "cache-clear"
+  | "sync/changes"
+  | "sync/push-from-studio"
+  | "sync/initial";
 
 export interface ConnectPayload {
   gameId: string;
@@ -44,6 +47,7 @@ export interface ExportPushPayload {
   scripts: ScriptDescriptor[];
   selectedUuids: string[];
   ancestorUuids: string[];
+  fullSync?: boolean;
 }
 
 export interface ImportPullPayload {

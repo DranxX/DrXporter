@@ -5,6 +5,8 @@ local BridgeClient = require(script.Parent["bridge-client"])
 local BridgeProtocol = require(script.Parent["bridge-protocol"])
 local State = require(script.Parent.state)
 local Logger = require(script.Parent.logger)
+local InstanceJsonSerializer = require(script.Parent.serializer["instance-json"])
+local ScriptFileSerializer = require(script.Parent.serializer["script-file"])
 
 local ExportService = {}
 
@@ -30,73 +32,39 @@ local function ensureAllUuids(root)
 	end
 end
 
+local function getParentUuid(instance)
+	local parent = instance.Parent
+	if not parent or parent == game then return nil end
+	return UuidService.getUuid(parent)
+end
+
 local function serializeInstance(instance)
-	local uuid = UuidService.getUuid(instance)
-	if not uuid then return nil end
-
-	local data = {
-		uuid = uuid,
-		className = instance.ClassName,
-		name = instance.Name,
-		properties = {},
-		attributes = {},
-		tags = {},
-		children = {},
-	}
-
-	pcall(function()
-		data.tags = instance:GetTags()
-	end)
-
-	local ok, attrs = pcall(function()
-		return instance:GetAttributes()
-	end)
-	if ok and attrs then
-		for key, value in attrs do
-			if key ~= Constants.UUID_ATTRIBUTE then
-				data.attributes[key] = value
-			end
-		end
+	local data = InstanceJsonSerializer.serialize(instance)
+	if data then
+		data.parentUuid = getParentUuid(instance)
 	end
-
-	for _, child in instance:GetChildren() do
-		local childUuid = UuidService.getUuid(child)
-		if childUuid then
-			table.insert(data.children, childUuid)
-		end
-	end
-
 	return data
 end
 
 local function serializeScript(instance)
-	local uuid = UuidService.getUuid(instance)
-	if not uuid then return nil end
-
-	local scriptType = "module"
-	if instance.ClassName == "Script" then
-		scriptType = "server"
-	elseif instance.ClassName == "LocalScript" then
-		scriptType = "client"
+	local data = ScriptFileSerializer.serialize(instance)
+	if data then
+		data.parentUuid = getParentUuid(instance)
 	end
-
-	local source = ""
-	pcall(function()
-		source = instance.Source
-	end)
-
-	return {
-		uuid = uuid,
-		name = instance.Name,
-		scriptType = scriptType,
-		source = source,
-		className = instance.ClassName,
-	}
+	return data
 end
 
 local function collectTree(root, instances, scripts, visited)
 	if visited[root] then return end
 	visited[root] = true
+
+	if Constants.SCRIPT_CLASSES[root.ClassName] then
+		local scriptData = serializeScript(root)
+		if scriptData then
+			table.insert(scripts, scriptData)
+		end
+		return
+	end
 
 	local data = serializeInstance(root)
 	if data then
@@ -115,7 +83,8 @@ local function collectTree(root, instances, scripts, visited)
 	end
 end
 
-function ExportService.exportSelection(selectedInstances)
+function ExportService.exportSelection(selectedInstances, options)
+	options = options or {}
 	Logger.info("Starting export for " .. #selectedInstances .. " selected instances")
 
 	for _, inst in selectedInstances do
@@ -161,7 +130,7 @@ function ExportService.exportSelection(selectedInstances)
 
 	Logger.info("Collected: " .. #instances .. " instances, " .. #scripts .. " scripts")
 
-	local payload = BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids)
+	local payload = BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids, options.fullSync == true)
 	local response, err = BridgeClient.request("export/push", payload.payload)
 
 	if not response then
@@ -187,7 +156,7 @@ function ExportService.exportAll()
 		end
 	end
 
-	return ExportService.exportSelection(allInstances)
+	return ExportService.exportSelection(allInstances, { fullSync = true })
 end
 
 local function hasScriptDescendant(instance)
