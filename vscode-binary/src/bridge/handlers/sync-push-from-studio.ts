@@ -19,6 +19,7 @@ import {
   joinRelativePath,
   normalizeRelativePath,
   removeEmptyWorkspaceFolder,
+  removeWorkspaceFolderTree,
   removeWorkspaceFile,
   replacePathLeaf,
   scriptExtension,
@@ -34,7 +35,7 @@ interface PushPayload {
   uuid: string;
   name: string;
   className: string;
-  type?: "script" | "instance";
+  type?: "script" | "instance" | "delete";
   parentUuid?: string | null;
   scriptType?: string;
   source?: string;
@@ -141,6 +142,59 @@ function isIncomingScript(payload: PushPayload, entry: CacheEntry | undefined): 
   return payload.type === "script" || isScriptClass(payload.className || entry?.className || "");
 }
 
+function collectSubtreeUuids(cacheEntries: Record<string, CacheEntry>, rootUuid: string): string[] {
+  const result: string[] = [];
+  const visited = new Set<string>();
+
+  function visit(uuid: string): void {
+    if (visited.has(uuid)) return;
+    visited.add(uuid);
+
+    const entry = cacheEntries[uuid];
+    if (!entry) return;
+
+    for (const [childUuid, childEntry] of Object.entries(cacheEntries)) {
+      if (childEntry.parentUuid === uuid) visit(childUuid);
+    }
+
+    for (const childUuid of entry.children || []) {
+      visit(childUuid);
+    }
+
+    result.push(uuid);
+  }
+
+  visit(rootUuid);
+  return result;
+}
+
+function removeCacheReference(cacheEntries: Record<string, CacheEntry>, removedUuid: string): void {
+  for (const entry of Object.values(cacheEntries)) {
+    if (entry.parentUuid === removedUuid) {
+      entry.parentUuid = null;
+    }
+    if (entry.children) {
+      entry.children = entry.children.filter((childUuid) => childUuid !== removedUuid);
+    }
+  }
+}
+
+function deleteStudioEntry(srcDir: string, cacheEntries: Record<string, CacheEntry>, uuid: string): boolean {
+  const entry = cacheEntries[uuid];
+  if (!entry) return false;
+
+  try {
+    removeWorkspaceFile(srcDir, entry.relativePath, entry.className);
+    if (isFolderClass(entry.className)) {
+      removeWorkspaceFolderTree(srcDir, entry.relativePath);
+    }
+  } catch {}
+
+  removeCacheReference(cacheEntries, uuid);
+  delete cacheEntries[uuid];
+  return true;
+}
+
 export async function handleSyncPushFromStudio(body: string): Promise<RouteResult> {
   const request = parseRequest<PushPayload>(body);
   if (!request) {
@@ -157,8 +211,30 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
   let relativePath: string | null = null;
   let created = false;
   let adoptedUuid: string | null = null;
+  let deleted = false;
+  let deletedCount = 0;
 
   for (const { key, cache } of targetCaches) {
+    if (payload.type === "delete") {
+      const subtreeUuids = collectSubtreeUuids(cache.entries, payload.uuid);
+      if (subtreeUuids.length === 0) continue;
+
+      for (const uuid of subtreeUuids) {
+        if (deleteStudioEntry(srcDir, cache.entries, uuid)) {
+          dropPendingChangesForUuid(uuid);
+          deletedCount++;
+        }
+      }
+
+      store.save(key, cache);
+      invalidateLookupCache();
+      startWatcher(srcDir, cacheDir);
+      deleted = true;
+      written = true;
+      logger.info(`Sync←Studio delete: ${payload.uuid} (${deletedCount} cached item(s))`);
+      break;
+    }
+
     let entry = cache.entries[payload.uuid];
     const desiredPath = resolveIncomingPath(cache.entries, entry, payload);
 
@@ -266,6 +342,6 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
 
   return {
     status: 200,
-    body: createResponse(request.requestId, { written, renamed, created, adoptedUuid, relativePath }),
+    body: createResponse(request.requestId, { written, renamed, created, deleted, deletedCount, adoptedUuid, relativePath }),
   };
 }

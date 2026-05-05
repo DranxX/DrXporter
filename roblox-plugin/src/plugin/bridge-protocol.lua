@@ -25,7 +25,7 @@ function BridgeProtocol.createConnectPayload()
 	})
 end
 
-function BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids, fullSync)
+function BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids, fullSync, forceOverwrite)
 	return BridgeProtocol.createRequest("export-push", {
 		cacheKey = State.getCacheKey(),
 		instances = instances,
@@ -33,6 +33,7 @@ function BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, a
 		selectedUuids = selectedUuids,
 		ancestorUuids = ancestorUuids,
 		fullSync = fullSync == true,
+		forceOverwrite = forceOverwrite == true,
 	})
 end
 

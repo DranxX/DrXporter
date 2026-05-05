@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { CacheEntry, InstanceJson, ScriptDescriptor } from "@drxporter/shared";
 import {
@@ -147,11 +147,20 @@ export function removeEmptyWorkspaceFolder(srcDir: string, relativePath: string)
       const removed = removeEmptyWorkspaceFolder(srcDir, `${normalized}/${entry.name}`);
       if (!removed) return false;
     }
-    rmSync(fullPath, { recursive: false });
+    rmdirSync(fullPath);
     return true;
   } catch {
     return false;
   }
+}
+
+export function removeWorkspaceFolderTree(srcDir: string, relativePath: string): boolean {
+  const normalized = normalizeRelativePath(relativePath);
+  if (!normalized) return false;
+  const fullPath = workspaceFolderPath(srcDir, normalized);
+  if (!fullPath || !existsSync(fullPath)) return false;
+  rmSync(fullPath, { recursive: true, force: true });
+  return true;
 }
 
 export function instanceJsonFromEntry(entry: CacheEntry): InstanceJson {

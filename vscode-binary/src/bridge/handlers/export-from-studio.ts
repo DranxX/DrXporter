@@ -9,7 +9,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   joinRelativePath,
-  removeEmptyWorkspaceFolder,
+  removeWorkspaceFolderTree,
   removeWorkspaceFile,
   scriptExtension,
   scriptTypeForClass,
@@ -143,14 +143,18 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
   const srcDir = resolve(process.cwd(), "src");
   let filesWritten = 0;
   let staleEntriesRemoved = 0;
-  const folderPathsToClean = new Set<string>();
+  const folderPathsToRemove = new Set<string>();
+  const fullSync = payload.fullSync === true || payload.forceOverwrite === true;
 
-  if (payload.fullSync) {
-    stopWatcher();
+  if (fullSync) {
     clearPendingChanges();
+  }
+
+  if (payload.forceOverwrite) {
+    stopWatcher();
     rmSync(srcDir, { recursive: true, force: true });
     mkdirSync(srcDir, { recursive: true });
-    logger.info("Full sync: cleared src before applying Roblox snapshot");
+    logger.info("Force overwrite: cleared src before applying Roblox snapshot");
   }
 
   for (const inst of payload.instances || []) {
@@ -162,7 +166,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
           logger.info(`Removed stale: src/${oldEntry.relativePath}`);
         }
         if (isFolderClass(oldEntry.className)) {
-          folderPathsToClean.add(oldEntry.relativePath);
+          folderPathsToRemove.add(oldEntry.relativePath);
         }
       } catch {}
     }
@@ -216,7 +220,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
           logger.info(`Removed stale: src/${oldEntry.relativePath}${oldExt}`);
         }
         if (isFolderClass(oldEntry.className)) {
-          folderPathsToClean.add(oldEntry.relativePath);
+          folderPathsToRemove.add(oldEntry.relativePath);
         }
       } catch {}
     }
@@ -245,7 +249,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
     }
   }
 
-  if (payload.fullSync) {
+  if (fullSync) {
     const activeArtifacts = new Set<string>();
     const activeFolderPaths = new Set<string>();
     for (const uuid of uuids) {
@@ -260,7 +264,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
       if (uuids.has(uuid)) continue;
 
       if (isFolderClass(oldEntry.className) && !activeFolderPaths.has(oldEntry.relativePath)) {
-        folderPathsToClean.add(oldEntry.relativePath);
+        folderPathsToRemove.add(oldEntry.relativePath);
       }
 
       if (!activeArtifacts.has(artifactKey(oldEntry))) {
@@ -276,12 +280,11 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
     }
   }
 
-  for (const relPath of Array.from(folderPathsToClean).sort((a, b) => b.length - a.length)) {
-    if (removeEmptyWorkspaceFolder(srcDir, relPath)) {
-      logger.info(`Removed empty folder: src/${relPath}/`);
+  for (const relPath of Array.from(folderPathsToRemove).sort((a, b) => b.length - a.length)) {
+    if (removeWorkspaceFolderTree(srcDir, relPath)) {
+      logger.info(`Removed folder tree: src/${relPath}/`);
     }
   }
-
   store.save(cacheKey, cache);
   invalidateLookupCache();
 
@@ -299,6 +302,7 @@ export async function handleExportFromStudio(body: string): Promise<RouteResult>
       scripts: payload.scripts?.length || 0,
       filesWritten,
       staleEntriesRemoved,
+      forceOverwrite: payload.forceOverwrite === true,
     }),
   };
 }

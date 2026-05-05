@@ -70,6 +70,16 @@ function OptionsView.render(parent)
 	})
 	refreshBtn.LayoutOrder = 4
 
+	local forceOverwriteBtn = Button.create({
+		name = "ForceOverwriteButton",
+		text = "FORCE OVERWRITE SRC",
+		color = Theme.Colors.Error,
+		textColor = Theme.Colors.Text,
+		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
+		parent = section.content,
+	})
+	forceOverwriteBtn.LayoutOrder = 5
+
 	local importBtn = Button.create({
 		name = "ImportButton",
 		text = "IMPORT SELECTED",
@@ -78,7 +88,7 @@ function OptionsView.render(parent)
 		size = UDim2.new(1, 0, 0, Theme.Size.RowHeight + 4),
 		parent = section.content,
 	})
-	importBtn.LayoutOrder = 5
+	importBtn.LayoutOrder = 6
 
 	local function showStatus(text, color)
 		statusLabel.Visible = true
@@ -162,13 +172,33 @@ function OptionsView.render(parent)
 		showStatus("Syncing Roblox snapshot to VSCode...", Theme.Colors.TextMuted)
 
 		task.spawn(function()
-			local success, err = SyncService.refreshAll()
+			local success, err = SyncService.refreshAll(false)
 			if success then
 				showStatus("✓ Refreshed from Roblox", Theme.Colors.Success)
 			else
 				showStatus("✗ Refresh failed: " .. tostring(err), Theme.Colors.Error)
 			end
 			refreshBtn.Text = "REFRESH FROM ROBLOX"
+		end)
+	end)
+
+	forceOverwriteBtn.MouseButton1Click:Connect(function()
+		if not State.isConnected() then
+			showStatus("✗ Not connected to bridge", Theme.Colors.Error)
+			return
+		end
+
+		forceOverwriteBtn.Text = "OVERWRITING..."
+		showStatus("Replacing src with Roblox snapshot...", Theme.Colors.Warning)
+
+		task.spawn(function()
+			local success, err = SyncService.refreshAll(true)
+			if success then
+				showStatus("✓ Force overwrite completed", Theme.Colors.Success)
+			else
+				showStatus("✗ Force overwrite failed: " .. tostring(err), Theme.Colors.Error)
+			end
+			forceOverwriteBtn.Text = "FORCE OVERWRITE SRC"
 		end)
 	end)
 

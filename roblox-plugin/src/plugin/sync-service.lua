@@ -188,10 +188,10 @@ local function serializePushPayload(instance, uuid)
 end
 
 local function pushInstanceToServer(instance, uuid)
-	if not State.isConnected() then return end
+	if not State.isConnected() then return false end
 
 	local data = serializePushPayload(instance, uuid)
-	if not data then return end
+	if not data then return false end
 
 	local payload = {
 		requestId = HttpService:GenerateGUID(false),
@@ -200,22 +200,57 @@ local function pushInstanceToServer(instance, uuid)
 		timestamp = os.time(),
 	}
 
-	task.spawn(function()
-		local ok, response = pcall(function()
-			return HttpService:RequestAsync({
-				Url = State.getBridgeUrl() .. "/sync/push-from-studio",
-				Method = "POST",
-				Headers = { ["Content-Type"] = "application/json" },
-				Body = HttpService:JSONEncode(payload),
-			})
-		end)
-		if ok and response and response.StatusCode == 200 then
-			Logger.info("Sync to VSCode: " .. instance:GetFullName())
-		else
-			local status = response and response.StatusCode or tostring(response)
-			Logger.warn("Sync to VSCode failed: " .. tostring(status))
-		end
+	local ok, response = pcall(function()
+		return HttpService:RequestAsync({
+			Url = State.getBridgeUrl() .. "/sync/push-from-studio",
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = HttpService:JSONEncode(payload),
+		})
 	end)
+	if ok and response and response.StatusCode == 200 then
+		Logger.info("Sync to VSCode: " .. instance:GetFullName())
+		return true
+	end
+
+	local status = response and response.StatusCode or tostring(response)
+	Logger.warn("Sync to VSCode failed: " .. tostring(status))
+	return false
+end
+
+local function pushDeleteToServer(uuid)
+	if not State.isConnected() then return false end
+
+	local payload = {
+		requestId = HttpService:GenerateGUID(false),
+		action = "sync/push-from-studio",
+		payload = {
+			cacheKey = State.getCacheKey(),
+			uuid = uuid,
+			name = "",
+			className = "",
+			type = "delete",
+			timestamp = os.time(),
+		},
+		timestamp = os.time(),
+	}
+
+	local ok, response = pcall(function()
+		return HttpService:RequestAsync({
+			Url = State.getBridgeUrl() .. "/sync/push-from-studio",
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = HttpService:JSONEncode(payload),
+		})
+	end)
+	if ok and response and response.StatusCode == 200 then
+		Logger.info("Deleted from VSCode: " .. uuid)
+		return true
+	end
+
+	local status = response and response.StatusCode or tostring(response)
+	Logger.warn("Delete sync to VSCode failed: " .. tostring(status))
+	return false
 end
 
 local function applyAttributes(target, attributes)
@@ -354,13 +389,15 @@ local function scanStudioChanges()
 	if _refreshing then return end
 
 	local currentUuids = refreshInstanceCache(false)
-	local needsFullRefresh = false
 
 	if currentUuids then
 		for uuid in _knownUuids do
 			if not currentUuids[uuid] then
-				_knownUuids[uuid] = nil
-				needsFullRefresh = true
+				if pushDeleteToServer(uuid) then
+					_knownUuids[uuid] = nil
+					_sourceHashes[uuid] = nil
+					_metadataHashes[uuid] = nil
+				end
 			end
 		end
 	end
@@ -372,9 +409,10 @@ local function scanStudioChanges()
 		if not inst or not inst.Parent then continue end
 
 		if not _knownUuids[uuid] then
-			_knownUuids[uuid] = true
 			refreshHashesFor(inst, uuid)
-			needsFullRefresh = true
+			if pushInstanceToServer(inst, uuid) then
+				_knownUuids[uuid] = true
+			end
 			continue
 		end
 
@@ -411,12 +449,6 @@ local function scanStudioChanges()
 		if changed then
 			pushInstanceToServer(inst, uuid)
 		end
-	end
-
-	if needsFullRefresh then
-		Logger.info("Studio tree changed, refreshing VSCode snapshot...")
-		SyncService.refreshAll()
-		return
 	end
 
 	local now = os.clock()
@@ -493,7 +525,7 @@ function SyncService.stopPolling()
 	_lastCacheRefresh = 0
 end
 
-function SyncService.refreshAll()
+function SyncService.refreshAll(forceOverwrite)
 	if not State.isConnected() then
 		return false, "Not connected to bridge"
 	end
@@ -502,12 +534,16 @@ function SyncService.refreshAll()
 	end
 
 	_refreshing = true
-	Logger.info("Manual refresh: exporting Roblox snapshot to VSCode")
+	if forceOverwrite then
+		Logger.info("Force overwrite: replacing VSCode src with Roblox snapshot")
+	else
+		Logger.info("Manual refresh: reconciling Roblox snapshot to VSCode")
+	end
 	refreshInstanceCache(true)
 
 	local ExportService = require(script.Parent["export-service"])
 	local ok, success, err = pcall(function()
-		return ExportService.exportAll()
+		return ExportService.exportAll({ forceOverwrite = forceOverwrite == true })
 	end)
 
 	if not ok then

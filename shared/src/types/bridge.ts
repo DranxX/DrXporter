@@ -48,6 +48,7 @@ export interface ExportPushPayload {
   selectedUuids: string[];
   ancestorUuids: string[];
   fullSync?: boolean;
+  forceOverwrite?: boolean;
 }
 
 export interface ImportPullPayload {

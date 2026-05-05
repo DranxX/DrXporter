@@ -130,7 +130,15 @@ function ExportService.exportSelection(selectedInstances, options)
 
 	Logger.info("Collected: " .. #instances .. " instances, " .. #scripts .. " scripts")
 
-	local payload = BridgeProtocol.createExportPayload(instances, scripts, selectedUuids, ancestorUuids, options.fullSync == true)
+	local payload =
+		BridgeProtocol.createExportPayload(
+			instances,
+			scripts,
+			selectedUuids,
+			ancestorUuids,
+			options.fullSync == true,
+			options.forceOverwrite == true
+		)
 	local response, err = BridgeClient.request("export/push", payload.payload)
 
 	if not response then
@@ -142,7 +150,8 @@ function ExportService.exportSelection(selectedInstances, options)
 	return true, nil
 end
 
-function ExportService.exportAll()
+function ExportService.exportAll(options)
+	options = options or {}
 	Logger.info("Starting full export of all services")
 
 	local allInstances = {}
@@ -156,7 +165,10 @@ function ExportService.exportAll()
 		end
 	end
 
-	return ExportService.exportSelection(allInstances, { fullSync = true })
+	return ExportService.exportSelection(allInstances, {
+		fullSync = options.fullSync ~= false,
+		forceOverwrite = options.forceOverwrite == true,
+	})
 end
 
 local function hasScriptDescendant(instance)
