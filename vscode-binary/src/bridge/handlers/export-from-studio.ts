@@ -90,7 +90,8 @@ function instanceFileNeedsWrite(srcDir: string, relativePath: string, instance: 
   if (!filePath || !existsSync(filePath)) return true;
 
   try {
-    return readFileSync(filePath, "utf-8") !== `${JSON.stringify(instance, null, 2)}\n`;
+    const current = JSON.parse(readFileSync(filePath, "utf-8"));
+    return stableStringify(current) !== stableStringify(instance);
   } catch {
     return true;
   }

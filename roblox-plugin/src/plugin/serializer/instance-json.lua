@@ -28,6 +28,7 @@ function InstanceJsonSerializer.serialize(instance)
 		end
 	end
 
+	table.sort(data.children)
 	return data
 end
 

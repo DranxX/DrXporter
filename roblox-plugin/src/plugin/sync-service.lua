@@ -21,6 +21,16 @@ local _knownUuids = {}
 local _refreshing = false
 local _lastCacheRefresh = 0
 local CACHE_REFRESH_INTERVAL = STUDIO_SCAN_INTERVAL
+local STABLE_NUMBER_PRECISION = 10000
+
+local function normalizeStableNumber(value)
+	if value ~= value or value == math.huge or value == -math.huge then return 0 end
+	if math.abs(value) < 0.5 / STABLE_NUMBER_PRECISION then return 0 end
+	if value >= 0 then
+		return math.floor(value * STABLE_NUMBER_PRECISION + 0.5) / STABLE_NUMBER_PRECISION
+	end
+	return math.ceil(value * STABLE_NUMBER_PRECISION - 0.5) / STABLE_NUMBER_PRECISION
+end
 
 local function hashSource(source)
 	if #source == 0 then return 0 end
@@ -36,6 +46,10 @@ end
 
 local function stableEncode(value)
 	local valueType = typeof(value)
+
+	if valueType == "number" then
+		return "number:" .. tostring(normalizeStableNumber(value))
+	end
 
 	if valueType == "table" then
 		local count = 0

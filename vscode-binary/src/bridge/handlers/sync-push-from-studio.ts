@@ -3,6 +3,7 @@ import { parseRequest, createResponse, createErrorResponse } from "../protocol";
 import { CacheStore } from "../../cache/cache-store";
 import { dropPendingChangesForUuid, invalidateLookupCache, markFileWritten, startWatcher } from "../watcher";
 import {
+  INSTANCE_JSON_EXTENSION,
   isFolderClass,
   isScriptClass,
   type AttributeValue,
@@ -13,7 +14,7 @@ import {
   type PropertyValue,
 } from "@drxporter/shared";
 import { createLogger } from "../../logging/logger";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   joinRelativePath,
@@ -24,6 +25,8 @@ import {
   replacePathLeaf,
   scriptExtension,
   scriptTypeForClass,
+  workspaceFilePath,
+  workspaceFolderPath,
   writeInstanceJsonFile,
   writeScriptFile,
 } from "../sync-files";
@@ -142,6 +145,76 @@ function isIncomingScript(payload: PushPayload, entry: CacheEntry | undefined): 
   return payload.type === "script" || isScriptClass(payload.className || entry?.className || "");
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function scriptEntryChanged(oldEntry: CacheEntry | undefined, nextEntry: CacheEntry): boolean {
+  if (!oldEntry) return true;
+  return (
+    oldEntry.uuid !== nextEntry.uuid ||
+    oldEntry.className !== nextEntry.className ||
+    oldEntry.name !== nextEntry.name ||
+    oldEntry.parentUuid !== nextEntry.parentUuid ||
+    oldEntry.relativePath !== nextEntry.relativePath ||
+    (oldEntry.source || "") !== (nextEntry.source || "")
+  );
+}
+
+function instanceEntryChanged(oldEntry: CacheEntry | undefined, nextEntry: CacheEntry): boolean {
+  if (!oldEntry) return true;
+  return (
+    oldEntry.uuid !== nextEntry.uuid ||
+    oldEntry.className !== nextEntry.className ||
+    oldEntry.name !== nextEntry.name ||
+    oldEntry.parentUuid !== nextEntry.parentUuid ||
+    oldEntry.relativePath !== nextEntry.relativePath ||
+    stableStringify(oldEntry.properties || {}) !== stableStringify(nextEntry.properties || {}) ||
+    stableStringify(oldEntry.attributes || {}) !== stableStringify(nextEntry.attributes || {}) ||
+    stableStringify(oldEntry.tags || []) !== stableStringify(nextEntry.tags || []) ||
+    stableStringify(oldEntry.children || []) !== stableStringify(nextEntry.children || [])
+  );
+}
+
+function scriptFileNeedsWrite(srcDir: string, relativePath: string, className: string, source: string): boolean {
+  const filePath = workspaceFilePath(srcDir, relativePath, scriptExtension(className));
+  if (!filePath || !existsSync(filePath)) return true;
+
+  try {
+    return readFileSync(filePath, "utf-8") !== source;
+  } catch {
+    return true;
+  }
+}
+
+function instanceFileNeedsWrite(srcDir: string, relativePath: string, instance: InstanceJson): boolean {
+  if (isFolderClass(instance.className)) {
+    const folderPath = workspaceFolderPath(srcDir, relativePath);
+    const legacyPath = workspaceFilePath(srcDir, relativePath, INSTANCE_JSON_EXTENSION);
+    return !folderPath || !existsSync(folderPath) || Boolean(legacyPath && existsSync(legacyPath));
+  }
+
+  const filePath = workspaceFilePath(srcDir, relativePath, INSTANCE_JSON_EXTENSION);
+  if (!filePath || !existsSync(filePath)) return true;
+
+  try {
+    const current = JSON.parse(readFileSync(filePath, "utf-8"));
+    return stableStringify(current) !== stableStringify(instance);
+  } catch {
+    return true;
+  }
+}
+
 function collectSubtreeUuids(cacheEntries: Record<string, CacheEntry>, rootUuid: string): string[] {
   const result: string[] = [];
   const visited = new Set<string>();
@@ -206,6 +279,7 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
   const store = new CacheStore(cacheDir);
   const srcDir = resolve(process.cwd(), "src");
   const targetCaches = loadTargetCaches(cacheDir, store, payload);
+  let processed = false;
   let written = false;
   let renamed = false;
   let relativePath: string | null = null;
@@ -229,6 +303,7 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
       store.save(key, cache);
       invalidateLookupCache();
       startWatcher(srcDir, cacheDir);
+      processed = true;
       deleted = true;
       written = true;
       logger.info(`Sync←Studio delete: ${payload.uuid} (${deletedCount} cached item(s))`);
@@ -254,6 +329,7 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
     const nextClassName = payload.className || entry?.className || "Folder";
     renamed = Boolean(entry && entry.relativePath !== nextRelPath) || Boolean(adoptedUuid);
     created = !entry;
+    processed = true;
 
     if (entry && (entry.relativePath !== nextRelPath || entry.className !== nextClassName)) {
       try {
@@ -274,21 +350,31 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
         parentUuid: payload.parentUuid !== undefined ? payload.parentUuid : entry?.parentUuid ?? null,
         relativePath: nextRelPath,
         source,
-        lastExportedAt: Date.now(),
+        lastExportedAt: entry?.lastExportedAt || Date.now(),
       };
-      cache.entries[payload.uuid] = nextEntry;
-      store.save(key, cache);
+      const entryChanged = scriptEntryChanged(entry, nextEntry);
+      const fileNeedsWrite = scriptFileNeedsWrite(srcDir, nextRelPath, nextEntry.className, source);
 
-      const fullPath = writeScriptFile(srcDir, nextRelPath, {
-        uuid: payload.uuid,
-        name: payload.name,
-        className: nextEntry.className,
-        scriptType: scriptTypeForClass(nextEntry.className),
-        source,
-      });
-      if (fullPath) {
-        markFileWritten(fullPath);
-        logger.info(`Sync←Studio: ${nextRelPath}${scriptExtension(nextEntry.className)}`);
+      if (entryChanged || fileNeedsWrite) {
+        nextEntry.lastExportedAt = Date.now();
+        cache.entries[payload.uuid] = nextEntry;
+        store.save(key, cache);
+
+        if (fileNeedsWrite) {
+          const fullPath = writeScriptFile(srcDir, nextRelPath, {
+            uuid: payload.uuid,
+            name: payload.name,
+            className: nextEntry.className,
+            scriptType: scriptTypeForClass(nextEntry.className),
+            source,
+          });
+          if (fullPath) {
+            markFileWritten(fullPath);
+            logger.info(`Sync←Studio: ${nextRelPath}${scriptExtension(nextEntry.className)}`);
+          }
+        }
+
+        written = true;
       }
     } else {
       const instanceJson: InstanceJson = {
@@ -311,32 +397,46 @@ export async function handleSyncPushFromStudio(body: string): Promise<RouteResul
         attributes: instanceJson.attributes,
         tags: instanceJson.tags,
         children: instanceJson.children,
-        lastExportedAt: Date.now(),
+        lastExportedAt: entry?.lastExportedAt || Date.now(),
       };
-      cache.entries[payload.uuid] = nextEntry;
-      store.save(key, cache);
 
-      const fullPath = writeInstanceJsonFile(srcDir, nextRelPath, instanceJson);
-      if (fullPath) {
-        markFileWritten(fullPath);
-        if (isFolderClass(nextEntry.className)) {
+      const entryChanged = instanceEntryChanged(entry, nextEntry);
+      const fileNeedsWrite = instanceFileNeedsWrite(srcDir, nextRelPath, instanceJson);
+
+      if (entryChanged || fileNeedsWrite) {
+        nextEntry.lastExportedAt = Date.now();
+        cache.entries[payload.uuid] = nextEntry;
+        store.save(key, cache);
+
+        if (fileNeedsWrite) {
+          const fullPath = writeInstanceJsonFile(srcDir, nextRelPath, instanceJson);
+          if (fullPath) {
+            markFileWritten(fullPath);
+            if (isFolderClass(nextEntry.className)) {
+              logger.info(`Sync←Studio: ${nextRelPath}/`);
+            } else {
+              logger.info(`Sync←Studio: ${nextRelPath}.instance.json`);
+            }
+          }
+        } else if (isFolderClass(nextEntry.className)) {
           logger.info(`Sync←Studio: ${nextRelPath}/`);
-        } else {
-          logger.info(`Sync←Studio: ${nextRelPath}.instance.json`);
         }
+
+        written = true;
       }
     }
 
     dropPendingChangesForUuid(payload.uuid);
     if (adoptedUuid) dropPendingChangesForUuid(adoptedUuid);
-    invalidateLookupCache();
-    startWatcher(srcDir, cacheDir);
-    written = true;
+    if (written) {
+      invalidateLookupCache();
+      startWatcher(srcDir, cacheDir);
+    }
     relativePath = nextRelPath;
     break;
   }
 
-  if (!written) {
+  if (!processed) {
     logger.debug(`UUID not in cache: ${payload.uuid}`);
   }
 

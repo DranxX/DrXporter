@@ -3,9 +3,27 @@ local PropertySelector = require(script.Parent.Parent["property-selector"])
 
 local SERIALIZABLE_TYPES = {
 	string = true,
-	number = true,
 	boolean = true,
 }
+
+local NUMBER_PRECISION = 10000
+
+local function normalizeNumber(value)
+	if value ~= value or value == math.huge or value == -math.huge then return 0 end
+	if math.abs(value) < 0.5 / NUMBER_PRECISION then return 0 end
+	if value >= 0 then
+		return math.floor(value * NUMBER_PRECISION + 0.5) / NUMBER_PRECISION
+	end
+	return math.ceil(value * NUMBER_PRECISION - 0.5) / NUMBER_PRECISION
+end
+
+local function normalizeNumberArray(values)
+	local result = {}
+	for i, value in values do
+		result[i] = normalizeNumber(value)
+	end
+	return result
+end
 
 local CLASS_PROPERTIES = {
 	Decal = { "Texture", "Color3", "Transparency", "Face" },
@@ -103,28 +121,32 @@ end
 function Properties.serializeValue(value)
 	local t = typeof(value)
 
+	if t == "number" then
+		return { type = t, value = normalizeNumber(value) }
+	end
+
 	if SERIALIZABLE_TYPES[t] then
 		return { type = t, value = value }
 	end
 
 	if t == "Color3" then
-		return { type = "Color3", value = { value.R, value.G, value.B } }
+		return { type = "Color3", value = normalizeNumberArray({ value.R, value.G, value.B }) }
 	end
 
 	if t == "Vector3" then
-		return { type = "Vector3", value = { value.X, value.Y, value.Z } }
+		return { type = "Vector3", value = normalizeNumberArray({ value.X, value.Y, value.Z }) }
 	end
 
 	if t == "Vector2" then
-		return { type = "Vector2", value = { value.X, value.Y } }
+		return { type = "Vector2", value = normalizeNumberArray({ value.X, value.Y }) }
 	end
 
 	if t == "UDim2" then
-		return { type = "UDim2", value = { value.X.Scale, value.X.Offset, value.Y.Scale, value.Y.Offset } }
+		return { type = "UDim2", value = normalizeNumberArray({ value.X.Scale, value.X.Offset, value.Y.Scale, value.Y.Offset }) }
 	end
 
 	if t == "UDim" then
-		return { type = "UDim", value = { value.Scale, value.Offset } }
+		return { type = "UDim", value = normalizeNumberArray({ value.Scale, value.Offset }) }
 	end
 
 	if t == "BrickColor" then
@@ -137,7 +159,7 @@ function Properties.serializeValue(value)
 	end
 
 	if t == "CFrame" then
-		return { type = "CFrame", value = { value:GetComponents() } }
+		return { type = "CFrame", value = normalizeNumberArray({ value:GetComponents() }) }
 	end
 
 	return nil

@@ -1,7 +1,9 @@
 local Tags = {}
 
 function Tags.serialize(instance)
-	return instance:GetTags()
+	local tags = instance:GetTags()
+	table.sort(tags)
+	return tags
 end
 
 function Tags.deserialize(instance, tags)
