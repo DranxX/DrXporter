@@ -39,6 +39,40 @@ function UuidService.ensureUuid(instance)
 	return nil
 end
 
+function UuidService.ensureUniqueUuid(instance, seen)
+	local uuid = UuidService.ensureUuid(instance)
+	if not uuid then return nil, false end
+
+	if seen and seen[uuid] and seen[uuid] ~= instance then
+		local newUuid = UuidService.generateUuid()
+		if UuidService.setUuid(instance, newUuid) then
+			seen[newUuid] = instance
+			return newUuid, true
+		end
+		return uuid, false
+	end
+
+	if seen then
+		seen[uuid] = instance
+	end
+	return uuid, false
+end
+
+function UuidService.ensureUniqueTree(root, seen)
+	seen = seen or {}
+	local resolved = 0
+	local _, rewritten = UuidService.ensureUniqueUuid(root, seen)
+	if rewritten then
+		resolved += 1
+	end
+
+	for _, child in root:GetChildren() do
+		resolved += UuidService.ensureUniqueTree(child, seen)
+	end
+
+	return resolved
+end
+
 function UuidService.hasUuid(instance)
 	return UuidService.getUuid(instance) ~= nil
 end

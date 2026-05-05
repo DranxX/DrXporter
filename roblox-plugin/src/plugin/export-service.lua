@@ -25,13 +25,6 @@ local function collectAncestors(instance)
 	return ancestors
 end
 
-local function ensureAllUuids(root)
-	UuidService.ensureUuid(root)
-	for _, child in root:GetChildren() do
-		ensureAllUuids(child)
-	end
-end
-
 local function getParentUuid(instance)
 	local parent = instance.Parent
 	if not parent or parent == game then return nil end
@@ -87,12 +80,22 @@ function ExportService.exportSelection(selectedInstances, options)
 	options = options or {}
 	Logger.info("Starting export for " .. #selectedInstances .. " selected instances")
 
+	local seenUuids = {}
+	local duplicateUuidsResolved = 0
+
 	for _, inst in selectedInstances do
-		ensureAllUuids(inst)
+		duplicateUuidsResolved += UuidService.ensureUniqueTree(inst, seenUuids)
 		local ancestors = collectAncestors(inst)
 		for _, ancestor in ancestors do
-			UuidService.ensureUuid(ancestor)
+			local _, rewritten = UuidService.ensureUniqueUuid(ancestor, seenUuids)
+			if rewritten then
+				duplicateUuidsResolved += 1
+			end
 		end
+	end
+
+	if duplicateUuidsResolved > 0 then
+		Logger.warn("Resolved " .. duplicateUuidsResolved .. " duplicate UUIDs before export")
 	end
 
 	local instances = {}

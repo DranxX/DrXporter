@@ -5,6 +5,31 @@ local Logger = require(script.Parent.logger)
 
 local BridgeClient = {}
 
+local function getResponseError(response)
+	local fallback = "HTTP " .. tostring(response and response.StatusCode or "unknown")
+	if not response or not response.Body or response.Body == "" then
+		return fallback
+	end
+
+	local decodeOk, decoded = pcall(function()
+		return HttpService:JSONDecode(response.Body)
+	end)
+	if not decodeOk or not decoded then
+		return fallback
+	end
+
+	if decoded.error and decoded.error.message then
+		return fallback .. ": " .. tostring(decoded.error.message)
+	end
+	if decoded.message then
+		return fallback .. ": " .. tostring(decoded.message)
+	end
+	if decoded.error then
+		return fallback .. ": " .. tostring(decoded.error)
+	end
+	return fallback
+end
+
 function BridgeClient.connect()
 	local url = State.getBridgeUrl() .. "/connect"
 	local payload = BridgeProtocol.createConnectPayload()
@@ -23,7 +48,7 @@ function BridgeClient.connect()
 	end
 
 	if response.StatusCode ~= 200 then
-		return false, "HTTP " .. tostring(response.StatusCode)
+		return false, getResponseError(response)
 	end
 
 	return true, nil
@@ -60,8 +85,9 @@ function BridgeClient.request(action, payload)
 	end
 
 	if response.StatusCode ~= 200 then
-		Logger.error("Bridge returned HTTP " .. tostring(response.StatusCode))
-		return nil, "HTTP " .. tostring(response.StatusCode)
+		local err = getResponseError(response)
+		Logger.error("Bridge returned " .. err)
+		return nil, err
 	end
 
 	local decodeOk, decoded = pcall(function()

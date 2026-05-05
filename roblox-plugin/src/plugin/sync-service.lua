@@ -148,8 +148,14 @@ local function refreshInstanceCache(force)
 	end
 	_lastCacheRefresh = now
 
+	local seenUuids = {}
+	local duplicateUuidsResolved = 0
+
 	local function ensureTree(instance)
-		UuidService.ensureUuid(instance)
+		local _, rewritten = UuidService.ensureUniqueUuid(instance, seenUuids)
+		if rewritten then
+			duplicateUuidsResolved += 1
+		end
 		for _, child in instance:GetChildren() do
 			ensureTree(child)
 		end
@@ -177,6 +183,10 @@ local function refreshInstanceCache(force)
 			ensureTree(svc)
 			traverse(svc)
 		end
+	end
+
+	if duplicateUuidsResolved > 0 then
+		Logger.warn("Resolved " .. duplicateUuidsResolved .. " duplicate UUIDs before sync")
 	end
 
 	_instanceCache = newCache
