@@ -7,21 +7,84 @@ local Selection = game:GetService("Selection")
 
 local ExplorerView = {}
 
+local function addCorner(parent, radius)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, radius or Theme.Size.BorderRadius)
+	corner.Parent = parent
+	return corner
+end
+
+local function addStroke(parent, transparency)
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Colors.Border
+	stroke.Transparency = transparency or 0.45
+	stroke.Thickness = 1
+	stroke.Parent = parent
+	return stroke
+end
+
 function ExplorerView.render(parent)
 	local section = Section.create({
 		name = "ExplorerSection",
-		title = "Explorer",
+		title = "Selection Explorer",
+		layoutOrder = 6,
 		parent = parent,
 	})
+
+	local summary = Instance.new("Frame")
+	summary.Name = "ExplorerSummary"
+	summary.Size = UDim2.new(1, 0, 0, 44)
+	summary.BackgroundColor3 = Theme.Colors.SurfaceAlt
+	summary.BorderSizePixel = 0
+	summary.LayoutOrder = 1
+	summary.Parent = section.content
+	addCorner(summary)
+	addStroke(summary, 0.5)
+
+	local summaryLabel = Instance.new("TextLabel")
+	summaryLabel.Name = "SummaryLabel"
+	summaryLabel.Size = UDim2.new(1, -24, 0, 18)
+	summaryLabel.Position = UDim2.new(0, 12, 0, 6)
+	summaryLabel.BackgroundTransparency = 1
+	summaryLabel.Font = Theme.Font.Bold
+	summaryLabel.TextSize = Theme.Size.TextSmall
+	summaryLabel.TextColor3 = Theme.Colors.Text
+	summaryLabel.TextXAlignment = Enum.TextXAlignment.Left
+	summaryLabel.Text = "0 selected"
+	summaryLabel.Parent = summary
+
+	local summaryHint = Instance.new("TextLabel")
+	summaryHint.Name = "SummaryHint"
+	summaryHint.Size = UDim2.new(1, -24, 0, 16)
+	summaryHint.Position = UDim2.new(0, 12, 0, 24)
+	summaryHint.BackgroundTransparency = 1
+	summaryHint.Font = Theme.Font.Default
+	summaryHint.TextSize = Theme.Size.TextTiny
+	summaryHint.TextColor3 = Theme.Colors.TextMuted
+	summaryHint.TextXAlignment = Enum.TextXAlignment.Left
+	summaryHint.Text = "Waiting for Roblox selection"
+	summaryHint.TextTruncate = Enum.TextTruncate.AtEnd
+	summaryHint.Parent = summary
 
 	local scroll = ScrollingFrame.create({
 		name = "ExplorerScroll",
 		size = UDim2.new(1, 0, 0, 0),
 		autoSize = true,
-		maxHeight = 300,
-		spacing = 1,
+		maxHeight = 260,
+		spacing = Theme.Size.PaddingSmall,
 		parent = section.content,
 	})
+	scroll.BackgroundColor3 = Theme.Colors.GlassSoft
+	scroll.LayoutOrder = 2
+	addCorner(scroll)
+	addStroke(scroll, 0.55)
+
+	local scrollPadding = Instance.new("UIPadding")
+	scrollPadding.PaddingTop = UDim.new(0, Theme.Size.PaddingSmall)
+	scrollPadding.PaddingBottom = UDim.new(0, Theme.Size.PaddingSmall)
+	scrollPadding.PaddingLeft = UDim.new(0, Theme.Size.PaddingSmall)
+	scrollPadding.PaddingRight = UDim.new(0, Theme.Size.PaddingSmall)
+	scrollPadding.Parent = scroll
 
 	local emptyLabel = Instance.new("TextLabel")
 	emptyLabel.Name = "EmptyLabel"
@@ -30,8 +93,22 @@ function ExplorerView.render(parent)
 	emptyLabel.Font = Theme.Font.Default
 	emptyLabel.TextSize = Theme.Size.TextSmall
 	emptyLabel.TextColor3 = Theme.Colors.TextMuted
-	emptyLabel.Text = "Select instances in Explorer to preview"
+	emptyLabel.Text = "Select a Roblox instance to preview."
 	emptyLabel.Parent = scroll
+
+	local function updateSummary(selectedInstances, connected)
+		local count = #selectedInstances
+		summaryLabel.Text = tostring(count) .. (count == 1 and " selected" or " selected")
+		if not connected then
+			summaryHint.Text = "Bridge offline"
+			return
+		end
+		if count == 0 then
+			summaryHint.Text = "Waiting for Roblox selection"
+		else
+			summaryHint.Text = "Previewing selection and direct children"
+		end
+	end
 
 	local function clearTree()
 		for _, child in scroll:GetChildren() do
@@ -56,11 +133,13 @@ function ExplorerView.render(parent)
 
 		if #selectedInstances == 0 then
 			emptyLabel.Visible = true
-			emptyLabel.Text = "Select instances in Explorer to preview"
+			emptyLabel.Text = "Select a Roblox instance to preview."
+			updateSummary(selectedInstances, true)
 			return
 		end
 
 		emptyLabel.Visible = false
+		updateSummary(selectedInstances, true)
 
 		local rendered = {}
 		local order = 0
@@ -119,9 +198,7 @@ function ExplorerView.render(parent)
 		end)
 
 		local initial = Selection:Get()
-		if #initial > 0 then
-			renderTree(initial)
-		end
+		renderTree(initial)
 	end
 
 	local function stopListening()
@@ -132,6 +209,7 @@ function ExplorerView.render(parent)
 		clearTree()
 		emptyLabel.Visible = true
 		emptyLabel.Text = "Connect to bridge to view instances"
+		updateSummary({}, false)
 	end
 
 	State.on("connectionChanged", function(connected)
@@ -144,6 +222,8 @@ function ExplorerView.render(parent)
 
 	if State.isConnected() then
 		startListening()
+	else
+		stopListening()
 	end
 
 	return {

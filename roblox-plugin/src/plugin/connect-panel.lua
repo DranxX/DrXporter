@@ -19,8 +19,10 @@ function ConnectPanel.connect(host, port)
 end
 
 function ConnectPanel.disconnect()
-	BridgeClient.disconnect()
 	State.setConnected(false)
+	task.spawn(function()
+		BridgeClient.disconnect()
+	end)
 	Logger.info("Disconnected from bridge")
 end
 

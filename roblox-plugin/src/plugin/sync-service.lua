@@ -502,8 +502,10 @@ local function applyDeleteChange(change)
 end
 
 local function scanStudioChanges()
-	if not State.isConnected() then return end
-	if _refreshing then return end
+	if not State.isConnected() then return 0 end
+	if _refreshing then return 0 end
+
+	local pushedChanges = 0
 
 	local currentUuids = refreshInstanceCache(false)
 
@@ -511,6 +513,7 @@ local function scanStudioChanges()
 		for uuid in _knownUuids do
 			if not currentUuids[uuid] then
 				if pushDeleteToServer(uuid) then
+					pushedChanges += 1
 					_knownUuids[uuid] = nil
 					_sourceHashes[uuid] = nil
 					_metadataHashes[uuid] = nil
@@ -528,6 +531,7 @@ local function scanStudioChanges()
 		if not _knownUuids[uuid] then
 			refreshHashesFor(inst, uuid)
 			if pushInstanceToServer(inst, uuid) then
+				pushedChanges += 1
 				_knownUuids[uuid] = true
 			end
 			continue
@@ -564,7 +568,9 @@ local function scanStudioChanges()
 		end
 
 		if changed then
-			pushInstanceToServer(inst, uuid)
+			if pushInstanceToServer(inst, uuid) then
+				pushedChanges += 1
+			end
 		end
 	end
 
@@ -574,6 +580,65 @@ local function scanStudioChanges()
 			_recentSynced[uuid] = nil
 		end
 	end
+
+	return pushedChanges
+end
+
+local function applyBridgeChange(change)
+	if change.type == "script" then
+		return applyScriptChange(change)
+	elseif change.type == "instance" then
+		return applyInstanceChange(change)
+	elseif change.type == "delete" then
+		return applyDeleteChange(change)
+	end
+	return false
+end
+
+local function applyBridgeChanges(changes)
+	local applied = 0
+	for _, change in changes do
+		if applyBridgeChange(change) then
+			applied += 1
+		end
+	end
+	return applied
+end
+
+local function requestBridgeChanges()
+	if not State.isConnected() then
+		return false, 0, "Not connected to bridge"
+	end
+
+	local ok, response = pcall(function()
+		return HttpService:RequestAsync({
+			Url = State.getBridgeUrl() .. "/sync/changes",
+			Method = "GET",
+		})
+	end)
+
+	if not ok then
+		return false, 0, response
+	end
+
+	if response.StatusCode ~= 200 then
+		return false, 0, "HTTP " .. tostring(response.StatusCode)
+	end
+
+	local decodeOk, data = pcall(function()
+		return HttpService:JSONDecode(response.Body)
+	end)
+
+	if not decodeOk or not data or not data.payload or not data.payload.changes then
+		return false, 0, "Invalid sync response"
+	end
+
+	local changes = data.payload.changes
+	if #changes > 0 then
+		Logger.info("Sync from VSCode: " .. #changes .. " item(s)")
+	end
+
+	return true, applyBridgeChanges(changes), nil
 end
 
 function SyncService.startPolling()
@@ -590,35 +655,7 @@ function SyncService.startPolling()
 
 	task.spawn(function()
 		while _polling and State.isConnected() do
-			local ok, response = pcall(function()
-				return HttpService:RequestAsync({
-					Url = State.getBridgeUrl() .. "/sync/changes",
-					Method = "GET",
-				})
-			end)
-
-			if ok and response.StatusCode == 200 then
-				local decodeOk, data = pcall(function()
-					return HttpService:JSONDecode(response.Body)
-				end)
-
-				if decodeOk and data and data.payload and data.payload.changes then
-					local changes = data.payload.changes
-					if #changes > 0 then
-						Logger.info("Sync from VSCode: " .. #changes .. " item(s)")
-							for _, change in changes do
-								if change.type == "script" then
-									applyScriptChange(change)
-								elseif change.type == "instance" then
-									applyInstanceChange(change)
-								elseif change.type == "delete" then
-									applyDeleteChange(change)
-								end
-							end
-					end
-				end
-			end
-
+			requestBridgeChanges()
 			task.wait(POLL_INTERVAL)
 		end
 		_polling = false
@@ -631,6 +668,44 @@ function SyncService.startPolling()
 			task.wait(STUDIO_SCAN_INTERVAL)
 		end
 	end)
+end
+
+function SyncService.refreshStudioChanges()
+	if not State.isConnected() then
+		return false, 0, "Not connected to bridge"
+	end
+	if _refreshing then
+		return false, 0, "Refresh already running"
+	end
+
+	Logger.info("Manual refresh: pushing changed Roblox items to VSCode")
+	local pushedChanges = scanStudioChanges()
+	return true, pushedChanges or 0, nil
+end
+
+function SyncService.refreshBridgeChanges()
+	if not State.isConnected() then
+		return false, 0, "Not connected to bridge"
+	end
+
+	Logger.info("Manual refresh: pulling changed VSCode items into Roblox")
+	return requestBridgeChanges()
+end
+
+function SyncService.regenerateAllUuids()
+	if _refreshing then
+		return false, 0, "Refresh already running"
+	end
+
+	_refreshing = true
+	local ok, count = pcall(function()
+		return UuidService.regenerateAll()
+	end)
+	_refreshing = false
+	if not ok then
+		return false, 0, count
+	end
+	return true, count, nil
 end
 
 function SyncService.stopPolling()
@@ -671,6 +746,10 @@ function SyncService.refreshAll(forceOverwrite)
 	end
 
 	if success then
+		_knownUuids = {}
+		_sourceHashes = {}
+		_metadataHashes = {}
+		_recentSynced = {}
 		for _, entry in _instanceCache do
 			_knownUuids[entry.uuid] = true
 			refreshHashesFor(entry.instance, entry.uuid)

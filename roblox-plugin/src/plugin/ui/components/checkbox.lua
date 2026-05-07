@@ -14,7 +14,7 @@ function Checkbox.create(props)
 	box.Size = UDim2.new(0, 16, 0, 16)
 	box.Position = UDim2.new(0, 0, 0.5, -8)
 	box.BackgroundColor3 = Theme.Colors.GlassSoft
-	box.BackgroundTransparency = 0.12
+	box.BackgroundTransparency = 0
 	box.BorderSizePixel = 0
 	box.Text = ""
 	box.Parent = frame
@@ -25,7 +25,7 @@ function Checkbox.create(props)
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Theme.Colors.Border
-	stroke.Transparency = 0.58
+	stroke.Transparency = 0.28
 	stroke.Thickness = 1
 	stroke.Parent = box
 

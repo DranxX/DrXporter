@@ -83,6 +83,47 @@ function UuidService.removeUuid(instance)
 	end)
 end
 
+function UuidService.regenerateTree(root, seen)
+	seen = seen or {}
+	local count = 0
+
+	local function rewrite(instance)
+		local uuid = UuidService.generateUuid()
+		while seen[uuid] do
+			uuid = UuidService.generateUuid()
+		end
+
+		seen[uuid] = true
+		if UuidService.setUuid(instance, uuid) then
+			count += 1
+		end
+
+		for _, child in instance:GetChildren() do
+			rewrite(child)
+		end
+	end
+
+	rewrite(root)
+	return count
+end
+
+function UuidService.regenerateAll()
+	local seen = {}
+	local count = 0
+
+	for _, serviceName in Constants.SERVICE_NAMES do
+		local success, svc = pcall(function()
+			return game:GetService(serviceName)
+		end)
+		if success and svc then
+			count += UuidService.regenerateTree(svc, seen)
+		end
+	end
+
+	Logger.warn("Regenerated " .. count .. " UUIDs")
+	return count
+end
+
 function UuidService.collectUuids(root)
 	local uuids = {}
 	local function traverse(inst)

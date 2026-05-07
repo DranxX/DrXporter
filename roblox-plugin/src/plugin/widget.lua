@@ -7,10 +7,10 @@ function Widget.create(plugin)
 		Enum.InitialDockState.Right,
 		false,
 		false,
-		320,
-		600,
-		280,
-		400
+		390,
+		640,
+		340,
+		440
 	)
 
 	local widget = plugin:CreateDockWidgetPluginGui(

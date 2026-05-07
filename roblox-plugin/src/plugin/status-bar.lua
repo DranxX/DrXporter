@@ -6,17 +6,23 @@ local StatusBar = {}
 function StatusBar.render(parent)
 	local frame = Instance.new("Frame")
 	frame.Name = "StatusBar"
-	frame.Size = UDim2.new(1, 0, 0, 28)
+	frame.Size = UDim2.new(1, 0, 0, 32)
 	frame.AnchorPoint = Vector2.new(0, 1)
 	frame.Position = UDim2.new(0, 0, 1, 0)
 	frame.BackgroundColor3 = Theme.Colors.Surface
 	frame.BorderSizePixel = 0
 	frame.Parent = parent
 
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Colors.Border
+	stroke.Transparency = 0.45
+	stroke.Thickness = 1
+	stroke.Parent = frame
+
 	local statusLabel = Instance.new("TextLabel")
 	statusLabel.Name = "StatusLabel"
-	statusLabel.Size = UDim2.new(1, -16, 1, 0)
-	statusLabel.Position = UDim2.new(0, 8, 0, 0)
+	statusLabel.Size = UDim2.new(1, -20, 1, 0)
+	statusLabel.Position = UDim2.new(0, 10, 0, 0)
 	statusLabel.BackgroundTransparency = 1
 	statusLabel.Font = Theme.Font.Default
 	statusLabel.TextSize = Theme.Size.TextSmall

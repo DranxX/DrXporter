@@ -5,10 +5,20 @@ local TreeItem = {}
 function TreeItem.create(props)
 	local frame = Instance.new("Frame")
 	frame.Name = "TreeItem_" .. (props.name or "")
-	frame.Size = UDim2.new(1, 0, 0, Theme.Size.RowHeight)
-	frame.BackgroundColor3 = Theme.Colors.Surface
-	frame.BackgroundTransparency = 1
+	frame.Size = UDim2.new(1, 0, 0, 30)
+	frame.BackgroundColor3 = Theme.Colors.SurfaceAlt
+	frame.BackgroundTransparency = 0
 	frame.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Colors.Border
+	stroke.Transparency = 0.7
+	stroke.Thickness = 1
+	stroke.Parent = frame
 
 	local indent = Instance.new("Frame")
 	indent.Name = "Indent"
@@ -24,7 +34,7 @@ function TreeItem.create(props)
 	icon.Font = Theme.Font.Mono
 	icon.TextSize = 11
 	icon.TextColor3 = Theme.Colors.AccentBlue
-	icon.Text = props.hasChildren and "▶" or "•"
+	icon.Text = props.hasChildren and ">" or "-"
 	icon.Parent = frame
 
 	local label = Instance.new("TextButton")
@@ -37,6 +47,7 @@ function TreeItem.create(props)
 	label.TextColor3 = Theme.Colors.Text
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Text = props.name or ""
+	label.TextTruncate = Enum.TextTruncate.AtEnd
 	label.BorderSizePixel = 0
 	label.Parent = frame
 
@@ -47,12 +58,11 @@ function TreeItem.create(props)
 	end)
 
 	frame.MouseEnter:Connect(function()
-		frame.BackgroundTransparency = 0
 		frame.BackgroundColor3 = Theme.Colors.SurfaceHover
 	end)
 
 	frame.MouseLeave:Connect(function()
-		frame.BackgroundTransparency = 1
+		frame.BackgroundColor3 = Theme.Colors.SurfaceAlt
 	end)
 
 	if props.parent then

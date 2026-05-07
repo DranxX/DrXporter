@@ -7,7 +7,7 @@ function Input.create(props)
 	frame.Name = props.name or "Input"
 	frame.Size = props.size or UDim2.new(1, 0, 0, 32)
 	frame.BackgroundColor3 = Theme.Colors.GlassSoft
-	frame.BackgroundTransparency = 0.18
+	frame.BackgroundTransparency = 0
 	frame.BorderSizePixel = 0
 
 	local corner = Instance.new("UICorner")
@@ -16,7 +16,7 @@ function Input.create(props)
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Theme.Colors.Border
-	stroke.Transparency = 0.66
+	stroke.Transparency = 0.3
 	stroke.Thickness = 1
 	stroke.Parent = frame
 

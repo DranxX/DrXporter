@@ -5,13 +5,15 @@ local Button = {}
 function Button.create(props)
 	local btn = Instance.new("TextButton")
 	btn.Name = props.name or "Button"
-	btn.Size = props.size or UDim2.new(1, 0, 0, 32)
+	btn.Size = props.size or UDim2.new(1, 0, 0, Theme.Size.RowHeight)
 	btn.BackgroundColor3 = props.color or Theme.Colors.AccentYellow
-	btn.BackgroundTransparency = props.transparency or 0.08
+	btn.BackgroundTransparency = props.transparency or 0
 	btn.TextColor3 = props.textColor or Theme.Colors.Background
 	btn.Font = Theme.Font.Bold
-	btn.TextSize = Theme.Size.TextNormal
+	btn.TextSize = props.textSize or Theme.Size.TextNormal
 	btn.Text = props.text or "Button"
+	btn.TextWrapped = props.textWrapped ~= false
+	btn.TextTruncate = Enum.TextTruncate.AtEnd
 	btn.BorderSizePixel = 0
 	btn.AutoButtonColor = true
 
@@ -20,22 +22,18 @@ function Button.create(props)
 	corner.Parent = btn
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.new(1, 1, 1)
-	stroke.Transparency = 0.78
+	stroke.Color = props.strokeColor or Theme.Colors.Border
+	stroke.Transparency = props.strokeTransparency or 0.35
 	stroke.Thickness = 1
 	stroke.Parent = btn
 
-	local gradient = Instance.new("UIGradient")
-	gradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
-		ColorSequenceKeypoint.new(1, props.color or Theme.Colors.AccentYellow),
-	})
-	gradient.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.75),
-		NumberSequenceKeypoint.new(1, 0.94),
-	})
-	gradient.Rotation = 90
-	gradient.Parent = btn
+	btn.MouseEnter:Connect(function()
+		btn.BackgroundTransparency = props.hoverTransparency or 0.08
+	end)
+
+	btn.MouseLeave:Connect(function()
+		btn.BackgroundTransparency = props.transparency or 0
+	end)
 
 	if props.onClick then
 		btn.MouseButton1Click:Connect(props.onClick)

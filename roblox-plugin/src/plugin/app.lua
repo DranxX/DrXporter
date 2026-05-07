@@ -16,13 +16,13 @@ function App.mount(widget, toolbar)
 	container.Name = "AppContainer"
 	container.Size = UDim2.fromScale(1, 1)
 	container.BackgroundColor3 = Theme.Colors.Background
-	container.BackgroundTransparency = 0.02
+	container.BackgroundTransparency = 0
 	container.BorderSizePixel = 0
 	container.Parent = widget
 
 	local contentArea = Instance.new("Frame")
 	contentArea.Name = "ContentArea"
-	contentArea.Size = UDim2.new(1, 0, 1, -28)
+	contentArea.Size = UDim2.new(1, 0, 1, -32)
 	contentArea.Position = UDim2.new(0, 0, 0, 0)
 	contentArea.BackgroundTransparency = 1
 	contentArea.BorderSizePixel = 0
