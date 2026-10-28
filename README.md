@@ -1,6 +1,7 @@
 # DrXporter
 
-> **⚠️ Notice:** This is a personal project and may be discontinued or updated infrequently. Feel free to modify the UI to suit your own needs.
+> [!WARNING]
+This project was originally developed before Roblox Studio introduced its built-in script synchronization features. It has been republished due to a security issue affecting my GitHub account. This is a personal project and may be discontinued or receive infrequent updates. Feel free to modify the UI to suit your own needs.
 
 Two-way sync system between Roblox Studio and your local filesystem. Export scripts and instances from Studio to organized local files, edit them in your favorite editor, and sync changes back — all in real-time.
 
