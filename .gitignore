@@ -1,0 +1,6 @@
+node_modules/
+planning/
+test-Project/
+dist/
+output/
+roblox-plugin/.gitignore
